@@ -2,7 +2,7 @@
 * @Author: BlahGeek
 * @Date:   2015-09-01
 * @Last Modified by:   BlahGeek
-* @Last Modified time: 2015-10-13
+* @Last Modified time: 2015-10-14
 */
 
 #include <stdio.h>
@@ -194,10 +194,10 @@ static int filter_frame(AVFilterLink *link, AVFrame *in)
             int p1 = (j >> 1) * out->linesize[1] + (i >> 1);
             int p2 = (j >> 1) * out->linesize[2] + (i >> 1);
 
-            std::pair<std::pair<double, double>, bool> map = s->remapper->get_map(i, j);
-            bool valid = map.second;
-            double real_x = map.first.first;
-            double real_y = map.first.second;
+            vr::PointAndFlag map = s->remapper->get_map(i, j);
+            double real_x = std::get<0>(map);
+            double real_y = std::get<1>(map);
+            bool valid = std::get<2>(map);
 
             if(!valid) {
                 out->data[0][p0] = 0;
