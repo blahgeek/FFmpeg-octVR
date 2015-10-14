@@ -23,6 +23,8 @@ extern "C" {
 #include "libavutil/opt.h"
 }
 
+#include <fstream>
+#include <iostream>
 #include "libmap.hpp"
 
 #define INTERPOLATE_METHOD(name) \
@@ -111,8 +113,8 @@ typedef struct {
     char * in_type_name;
     char * out_type_name;
 
-    char * in_opts;
-    char * out_opts;
+    char * in_opt;
+    char * out_opt;
 
     double rotate_x, rotate_y, rotate_z; // degree
 
@@ -145,9 +147,19 @@ static int config_input(AVFilterLink *link)
     VRMapContext *s = static_cast<VRMapContext *>(ctx->priv);
     av_log(ctx, AV_LOG_VERBOSE, "Input: %dx%d\n", link->w, link->h);
 
+    vr::json in_opt_json, out_opt_json;
+    if(s->in_opt) {
+        std::ifstream f(s->in_opt);
+        in_opt_json << f;
+    }
+    if(s->out_opt) {
+        std::ifstream f(s->out_opt);
+        out_opt_json << f;
+    }
+
     try {
-        s->remapper = new vr::Remapper(s->in_type_name, vr::json::parse(s->in_opts),
-                                       s->out_type_name, vr::json::parse(s->out_opts),
+        s->remapper = new vr::Remapper(s->in_type_name, in_opt_json,
+                                       s->out_type_name, out_opt_json,
                                        s->rotate_z, s->rotate_y, s->rotate_x,
                                        link->w, link->h, s->out_width, s->out_height);
     } catch (std::string & e) {
@@ -230,8 +242,8 @@ static int filter_frame(AVFilterLink *link, AVFrame *in)
 static const AVOption vr_map_options[] = {
     { "in", "Input projection type", OFFSET(in_type_name), AV_OPT_TYPE_STRING, {.str = "equirectangular"}, CHAR_MIN, CHAR_MAX, FLAGS},
     { "out", "Output projection type", OFFSET(out_type_name), AV_OPT_TYPE_STRING, {.str = "normal"}, CHAR_MIN, CHAR_MAX, FLAGS},
-    { "in_opts", "Camera parameter for input", OFFSET(in_opts), AV_OPT_TYPE_STRING, {.str = "{}"}, CHAR_MIN, CHAR_MAX, FLAGS},
-    { "out_opts", "Camera parameter for output", OFFSET(out_opts), AV_OPT_TYPE_STRING, {.str = "{}"}, CHAR_MIN, CHAR_MAX, FLAGS},
+    { "in_opt", "Camera parameter for input (json file)", OFFSET(in_opt), AV_OPT_TYPE_STRING, {.str = NULL}, CHAR_MIN, CHAR_MAX, FLAGS},
+    { "out_opt", "Camera parameter for output (json file)", OFFSET(out_opt), AV_OPT_TYPE_STRING, {.str = NULL}, CHAR_MIN, CHAR_MAX, FLAGS},
     { "out_width", "Output width", OFFSET(out_width), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS},
     { "out_height", "Output height", OFFSET(out_height), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS},
     { "rotate_z", "Rotate degree based on Z-axis", OFFSET(rotate_z), AV_OPT_TYPE_DOUBLE, {.dbl = 0}, 0, 360, FLAGS},
