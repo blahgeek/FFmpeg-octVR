@@ -2,7 +2,7 @@
 * @Author: BlahGeek
 * @Date:   2015-09-01
 * @Last Modified by:   BlahGeek
-* @Last Modified time: 2015-10-14
+* @Last Modified time: 2015-10-18
 */
 
 #include <stdio.h>
@@ -116,8 +116,6 @@ typedef struct {
     char * in_opt;
     char * out_opt;
 
-    double rotate_x, rotate_y, rotate_z; // degree
-
     int out_width, out_height;
     vr::Remapper * remapper;
 } VRMapContext;
@@ -160,16 +158,15 @@ static int config_input(AVFilterLink *link)
     try {
         s->remapper = new vr::Remapper(s->in_type_name, in_opt_json,
                                        s->out_type_name, out_opt_json,
-                                       s->rotate_z, s->rotate_y, s->rotate_x,
                                        link->w, link->h, s->out_width, s->out_height);
     } catch (std::string & e) {
         av_log(ctx, AV_LOG_ERROR, "Error: %s\n", e.c_str());
         return -1;
     }
 
-    std::pair<int, int> output_size = s->remapper->get_output_size();
-    s->out_width = output_size.first;
-    s->out_height = output_size.second;
+    auto output_size = s->remapper->get_output_size();
+    s->out_width = output_size.width;
+    s->out_height = output_size.height;
     av_log(ctx, AV_LOG_VERBOSE, "Output: %dx%d\n", s->out_width, s->out_height);
 
     return 0;
@@ -206,10 +203,10 @@ static int filter_frame(AVFilterLink *link, AVFrame *in)
             int p1 = (j >> 1) * out->linesize[1] + (i >> 1);
             int p2 = (j >> 1) * out->linesize[2] + (i >> 1);
 
-            vr::PointAndFlag map = s->remapper->get_map(i, j);
-            double real_x = std::get<0>(map);
-            double real_y = std::get<1>(map);
-            bool valid = std::get<2>(map);
+            auto map = s->remapper->get_map(i, j);
+            double real_x = map.x;
+            double real_y = map.y;
+            bool valid = !isnan(real_x) && !isnan(real_y);
 
             if(!valid) {
                 out->data[0][p0] = 0;
@@ -246,9 +243,6 @@ static const AVOption vr_map_options[] = {
     { "out_opt", "Camera parameter for output (json file)", OFFSET(out_opt), AV_OPT_TYPE_STRING, {.str = NULL}, CHAR_MIN, CHAR_MAX, FLAGS},
     { "out_width", "Output width", OFFSET(out_width), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS},
     { "out_height", "Output height", OFFSET(out_height), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS},
-    { "rotate_z", "Rotate degree based on Z-axis", OFFSET(rotate_z), AV_OPT_TYPE_DOUBLE, {.dbl = 0}, 0, 360, FLAGS},
-    { "rotate_y", "Rotate degree based on Y-axis", OFFSET(rotate_y), AV_OPT_TYPE_DOUBLE, {.dbl = 0}, 0, 360, FLAGS},
-    { "rotate_x", "Rotate degree based on X-axis", OFFSET(rotate_x), AV_OPT_TYPE_DOUBLE, {.dbl = 0}, 0, 360, FLAGS},
     { NULL }
 };
 
