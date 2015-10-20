@@ -2,7 +2,7 @@
 * @Author: BlahGeek
 * @Date:   2015-09-01
 * @Last Modified by:   BlahGeek
-* @Last Modified time: 2015-10-19
+* @Last Modified time: 2015-10-20
 */
 
 #include <stdio.h>
@@ -241,9 +241,9 @@ static int init(AVFilterContext *ctx) {
 
     av_assert0(s->remapper == nullptr);
 
-    s->remapper = new vr::MultiMapper(s->options["output"]["type"],
-                                      s->options["output"]["options"],
-                                      s->out_width, s->out_height);
+    s->remapper = vr::MultiMapper::New(s->options["output"]["type"],
+                                       s->options["output"]["options"],
+                                       s->out_width, s->out_height);
     auto final_size = s->remapper->get_output_size();
     s->out_width = final_size.width;
     s->out_height = final_size.height;
