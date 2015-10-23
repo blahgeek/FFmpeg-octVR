@@ -2,7 +2,7 @@
 * @Author: BlahGeek
 * @Date:   2015-09-01
 * @Last Modified by:   BlahGeek
-* @Last Modified time: 2015-10-20
+* @Last Modified time: 2015-10-23
 */
 
 #include <stdio.h>
@@ -28,87 +28,6 @@ extern "C" {
 #include <algorithm>
 #include "libmap.hpp"
 
-#define INTERPOLATE_METHOD(name) \
-    static uint8_t name(double x, double y, const uint8_t *src, \
-                        int width, int height, int stride, uint8_t def)
-
-
-static uint8_t PIXEL(const uint8_t * src, int x, int y, int width, int height, int stride, int def) {
-    if(x < 0) x += width;
-    else if(x >= width) x -= width;
-
-    if(y < 0) y += height;
-    else if(y >= height) y -= height;
-
-    return src[x + y * stride];
-}
-
-/**
- * Nearest neighbor interpolation
- */
-INTERPOLATE_METHOD(interpolate_nearest)
-{
-    return PIXEL(src, (int)(x + 0.5), (int)(y + 0.5), width, height, stride, def);
-}
-
-/**
- * Bilinear interpolation
- */
-INTERPOLATE_METHOD(interpolate_bilinear)
-{
-    int x_c, x_f, y_c, y_f;
-    int v1, v2, v3, v4;
-
-    if (x < -1 || x > width || y < -1 || y > height) {
-        return def;
-    } else {
-        x_f = (int)x;
-        x_c = x_f + 1;
-
-        y_f = (int)y;
-        y_c = y_f + 1;
-
-        v1 = PIXEL(src, x_c, y_c, width, height, stride, def);
-        v2 = PIXEL(src, x_c, y_f, width, height, stride, def);
-        v3 = PIXEL(src, x_f, y_c, width, height, stride, def);
-        v4 = PIXEL(src, x_f, y_f, width, height, stride, def);
-
-        return (v1*(x - x_f)*(y - y_f) + v2*((x - x_f)*(y_c - y)) +
-                v3*(x_c - x)*(y - y_f) + v4*((x_c - x)*(y_c - y)));
-    }
-}
-
-/**
- * Biquadratic interpolation
- */
-INTERPOLATE_METHOD(interpolate_biquadratic)
-{
-    int     x_c, x_f, y_c, y_f;
-    uint8_t v1,  v2,  v3,  v4;
-    double  f1,  f2,  f3,  f4;
-
-    if (x < - 1 || x > width || y < -1 || y > height)
-        return def;
-    else {
-        x_f = (int)x;
-        x_c = x_f + 1;
-        y_f = (int)y;
-        y_c = y_f + 1;
-
-        v1 = PIXEL(src, x_c, y_c, width, height, stride, def);
-        v2 = PIXEL(src, x_c, y_f, width, height, stride, def);
-        v3 = PIXEL(src, x_f, y_c, width, height, stride, def);
-        v4 = PIXEL(src, x_f, y_f, width, height, stride, def);
-
-        f1 = 1 - sqrt((x_c - x) * (y_c - y));
-        f2 = 1 - sqrt((x_c - x) * (y - y_f));
-        f3 = 1 - sqrt((x - x_f) * (y_c - y));
-        f4 = 1 - sqrt((x - x_f) * (y - y_f));
-        return (v1 * f1 + v2 * f2 + v3 * f3 + v4 * f4) / (f1 + f2 + f3 + f4);
-    }
-}
-
-
 typedef struct {
     const AVClass *avclass;
 
@@ -125,7 +44,7 @@ typedef struct {
 static int query_formats(AVFilterContext *ctx)
 {
     AVFilterFormats *formats = NULL;
-    ff_add_format(&formats, AV_PIX_FMT_YUV420P);
+    ff_add_format(&formats, AV_PIX_FMT_BGR24); // for OpenCV
     return ff_set_common_formats(ctx, formats);
 }
 
@@ -146,51 +65,19 @@ static int push_frame(AVFilterContext * ctx) {
     }
 
     av_log(ctx, AV_LOG_WARNING, "out: %dx%d\n", s->out_width, s->out_height);
-    av_assert0(ctx->outputs != nullptr);
-    av_assert0(ctx->outputs[0] != nullptr);
     AVFrame * out = ff_get_video_buffer(ctx->outputs[0], s->out_width, s->out_height);
     if(!out) return AVERROR(ENOMEM);
     av_frame_copy_props(out, frames[0]);
 
-    av_assert0(out->width == s->out_width);
-    av_assert0(out->height == s->out_height);
+    av_assert0(out->data[0] != nullptr);
+    av_assert0(out->data[1] == nullptr);
+    cv::Mat out_mat(s->out_height, s->out_width, CV_8UC3, out->data[0], out->linesize[0]);
 
-    for(int j = 0 ; j < s->out_height ; j += 1) {
-        for(int i = 0 ; i < s->out_width ; i += 1) {
-            int p0 = j * out->linesize[0] + i;
-            int p1 = (j >> 1) * out->linesize[1] + (i >> 1);
-            int p2 = (j >> 1) * out->linesize[2] + (i >> 1);
+    std::vector<cv::Mat> in_mats;
+    for(auto & f: frames)
+        in_mats.emplace_back(f->height, f->width, CV_8UC3, f->data[0], f->linesize[0]);
 
-            auto map = s->remapper->get_map(i, j);
-            int frame_index = map.first;
-            double real_x = map.second.x;
-            double real_y = map.second.y;
-            bool valid = !isnan(real_x) && !isnan(real_y);
-
-            AVFrame * in = frames[frame_index];
-            av_assert0(in != nullptr);
-
-            if(!valid) {
-                out->data[0][p0] = 0;
-                if((i & 1) == 0 && (j & 1) == 0)
-                    out->data[1][p1] = out->data[2][p2] = 128; // black, zero yields green
-                continue;
-            }
-
-            av_assert0(out != nullptr);
-            out->data[0][p0] = 
-                interpolate_bilinear(real_x, real_y, in->data[0],
-                                     in->width, in->height, in->linesize[0], 0);
-            if((i & 1) == 0 && (j & 1) == 0) {
-                out->data[1][p1] = 
-                    interpolate_bilinear(real_x / 2, real_y / 2, in->data[1],
-                                         in->width >> 1, in->height >> 1, in->linesize[1], 0);
-                out->data[2][p2] = 
-                    interpolate_bilinear(real_x / 2, real_y / 2, in->data[2],
-                                         in->width >> 1, in->height >> 1, in->linesize[2], 0);
-            }
-        }
-    }
+    s->remapper->get_output(in_mats, out_mat);
 
     for(auto f: frames)
         av_frame_free(&f);
