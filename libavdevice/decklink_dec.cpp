@@ -26,12 +26,16 @@
 
 #include <stdio.h>
 #include <signal.h>
+#include <unistd.h>
 
 extern "C" {
 #include "libavformat/avformat.h"
 #include "libavformat/internal.h"
 #include "libavutil/imgutils.h"
+#include "libavutil/avassert.h"
 }
+
+#include <vector>
 
 #include "decklink_common.h"
 #include "decklink_dec.h"
@@ -344,7 +348,7 @@ static HRESULT decklink_start_input(AVFormatContext *avctx)
 
     if(cctx->slave) {
         g_cctx = cctx;
-        av_log(ctx, AV_LOG_WARNING, "Waiting for master...\n");
+        av_log(avctx, AV_LOG_WARNING, "Waiting for master...\n");
         signal(SIGUSR1, slave_got_signal);
         while(!cctx->ready)
             usleep(1000);
@@ -352,10 +356,14 @@ static HRESULT decklink_start_input(AVFormatContext *avctx)
     } else {
         FILE * fp = popen("pgrep ffmpeg", "r");
         av_assert0(fp != NULL);
-        std::vector<int> pids;
-        int pid = 0;
-        while(fscanf(fp, "%d", &pid)) {
-            av_log(ctx, AV_LOG_WARNING, "Sending signal to PID %d...\n", pid);
+
+        pid_t myself = getpid();
+        std::vector<pid_t> pids;
+        pid_t pid = 0;
+        while(fscanf(fp, "%d", &pid) > 0) {
+            if(pid == myself)
+                continue;
+            av_log(avctx, AV_LOG_WARNING, "Sending signal to PID %d...\n", pid);
             pids.push_back(pid);
         }
         pclose(fp);
