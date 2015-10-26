@@ -189,6 +189,17 @@ static const AVOption vr_map_options[] = {
 };
 
 // g++真心傻逼
+
+//             Clang大法好
+// 天灭g++               退GNU保平安
+// 人在做 天在看          代码耦合留祸患
+// 内存占用电脑灭         跳出GNU保平安
+// 诚心诚念Clang好        模块设计有保障
+// 众生都为码农来         现世险恶忘前缘
+// Chris Lattner说真相   教你脱险莫拒绝
+// 早日摆脱g++           早日获得新生
+// 上网搜索「九评GNU」     有 真 相
+
 // AVFILTER_DEFINE_CLASS(vr_map);
 static const AVClass vr_map_class = {
     "vr_map", // class_name

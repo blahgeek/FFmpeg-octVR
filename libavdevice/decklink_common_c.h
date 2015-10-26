@@ -29,5 +29,6 @@ struct decklink_cctx {
     int list_formats;
     double preroll;
     int v210;
+    int rgb;
 };
 

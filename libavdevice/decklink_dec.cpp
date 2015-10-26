@@ -475,13 +475,19 @@ av_cold int ff_decklink_read_header(AVFormatContext *avctx)
     st->codec->time_base.num      = ctx->bmd_tb_num;
     st->codec->bit_rate    = avpicture_get_size(st->codec->pix_fmt, ctx->bmd_width, ctx->bmd_height) * 1/av_q2d(st->codec->time_base) * 8;
 
-    if (cctx->v210) {
-        st->codec->codec_id    = AV_CODEC_ID_V210;
-        st->codec->codec_tag   = MKTAG('V', '2', '1', '0');
-    } else {
+    if(cctx->rgb) {
         st->codec->codec_id    = AV_CODEC_ID_RAWVIDEO;
-        st->codec->pix_fmt     = AV_PIX_FMT_UYVY422;
-        st->codec->codec_tag   = MKTAG('U', 'Y', 'V', 'Y');
+        st->codec->pix_fmt     = AV_PIX_FMT_RGB48;
+        st->codec->codec_tag   = avcodec_pix_fmt_to_codec_tag(AV_PIX_FMT_RGB48);
+    } else {
+        if (cctx->v210) {
+            st->codec->codec_id    = AV_CODEC_ID_V210;
+            st->codec->codec_tag   = MKTAG('V', '2', '1', '0');
+        } else {
+            st->codec->codec_id    = AV_CODEC_ID_RAWVIDEO;
+            st->codec->pix_fmt     = AV_PIX_FMT_UYVY422;
+            st->codec->codec_tag   = MKTAG('U', 'Y', 'V', 'Y');
+        }
     }
 
     avpriv_set_pts_info(st, 64, 1, 1000000);  /* 64 bits pts in us */
@@ -496,7 +502,7 @@ av_cold int ff_decklink_read_header(AVFormatContext *avctx)
     }
 
     result = ctx->dli->EnableVideoInput(ctx->bmd_mode,
-                                        cctx->v210 ? bmdFormat10BitYUV : bmdFormat8BitYUV,
+                                        cctx->rgb ? bmdFormat10BitRGB : (cctx->v210 ? bmdFormat10BitYUV : bmdFormat8BitYUV),
                                         bmdVideoInputFlagDefault);
 
     if (result != S_OK) {
