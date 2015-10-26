@@ -188,7 +188,20 @@ static const AVOption vr_map_options[] = {
     { NULL }
 };
 
-AVFILTER_DEFINE_CLASS(vr_map);
+// g++真心傻逼
+// AVFILTER_DEFINE_CLASS(vr_map);
+static const AVClass vr_map_class = {
+    "vr_map", // class_name
+    av_default_item_name, // item_name
+    vr_map_options, // option
+    LIBAVUTIL_VERSION_INT, // version
+    0, 0,
+    NULL, // child_next
+    NULL, // child_class_next
+    AV_CLASS_CATEGORY_FILTER, // category
+    NULL, // get_category
+    NULL, // query_ranges
+};
 
 // g++傻逼
 static const AVFilterPad avfilter_vf_vr_map_output_ = {
