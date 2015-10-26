@@ -24,6 +24,9 @@
 #include <pthread.h>
 #include <semaphore.h>
 
+#include <stdio.h>
+#include <signal.h>
+
 extern "C" {
 #include "libavformat/avformat.h"
 #include "libavformat/internal.h"
@@ -142,6 +145,12 @@ static int avpacket_queue_get(AVPacketQueue *q, AVPacket *pkt, int block)
     }
     pthread_mutex_unlock(&q->mutex);
     return ret;
+}
+
+static struct decklink_cctx * g_cctx = NULL;
+static void slave_got_signal(int signal) {
+    if(g_cctx)
+        g_cctx->ready = 1;
 }
 
 class decklink_input_callback : public IDeckLinkInputCallback
@@ -332,6 +341,28 @@ static HRESULT decklink_start_input(AVFormatContext *avctx)
 
     ctx->input_callback = new decklink_input_callback(avctx);
     ctx->dli->SetCallback(ctx->input_callback);
+
+    if(cctx->slave) {
+        g_cctx = cctx;
+        av_log(ctx, AV_LOG_WARNING, "Waiting for master...\n");
+        signal(SIGUSR1, slave_got_signal);
+        while(!cctx->ready)
+            usleep(1000);
+        g_cctx = NULL;
+    } else {
+        FILE * fp = popen("pgrep ffmpeg", "r");
+        av_assert0(fp != NULL);
+        std::vector<int> pids;
+        int pid = 0;
+        while(fscanf(fp, "%d", &pid)) {
+            av_log(ctx, AV_LOG_WARNING, "Sending signal to PID %d...\n", pid);
+            pids.push_back(pid);
+        }
+        pclose(fp);
+        for(int i = 0 ; i < pids.size() ; i += 1)
+            kill(pids[i], SIGUSR1);
+    }
+
     return ctx->dli->StartStreams();
 }
 

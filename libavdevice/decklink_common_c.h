@@ -30,5 +30,8 @@ struct decklink_cctx {
     double preroll;
     int v210;
     int rgb;
+
+    int slave; // slaves should wait for master's signal
+    int ready; // synchorize many decklink instance
 };
 

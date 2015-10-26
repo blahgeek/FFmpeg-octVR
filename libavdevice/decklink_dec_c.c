@@ -33,6 +33,7 @@ static const AVOption options[] = {
     { "list_formats", "list supported formats"  , OFFSET(list_formats), AV_OPT_TYPE_INT   , { .i64 = 0   }, 0, 1, DEC },
     { "bm_v210",      "v210 10 bit per channel" , OFFSET(v210),         AV_OPT_TYPE_INT   , { .i64 = 0   }, 0, 1, DEC },
     { "rgb",          "use rgb pixel format",     OFFSET(rgb),          AV_OPT_TYPE_INT,    { .i64 = 0   }, 0, 1, DEC },
+    { "slave",        "wait for master's signal", OFFSET(slave),        AV_OPT_TYPE_INT,    { .i64 = 0   }, 0, 1, DEC },
     { NULL },
 };
 
