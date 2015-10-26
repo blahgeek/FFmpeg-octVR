@@ -322,6 +322,10 @@ HRESULT decklink_input_callback::VideoInputFormatChanged(
     BMDVideoInputFormatChangedEvents events, IDeckLinkDisplayMode *mode,
     BMDDetectedVideoInputFormatFlags)
 {
+    char * mode_name = NULL;
+    mode->GetName(&mode_name);
+    av_log(NULL, AV_LOG_WARNING, "BMD Format Change: %d\n", mode_name);
+    free(mode_name);
     return S_OK;
 }
 
@@ -497,7 +501,7 @@ av_cold int ff_decklink_read_header(AVFormatContext *avctx)
 
     result = ctx->dli->EnableVideoInput(ctx->bmd_mode,
                                         cctx->v210 ? bmdFormat10BitYUV : bmdFormat8BitYUV,
-                                        bmdVideoInputFlagDefault);
+                                        bmdVideoInputEnableFormatDetection);
 
     if (result != S_OK) {
         av_log(avctx, AV_LOG_ERROR, "Cannot enable video input\n");
