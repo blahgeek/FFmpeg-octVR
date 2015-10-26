@@ -476,9 +476,8 @@ av_cold int ff_decklink_read_header(AVFormatContext *avctx)
     st->codec->bit_rate    = avpicture_get_size(st->codec->pix_fmt, ctx->bmd_width, ctx->bmd_height) * 1/av_q2d(st->codec->time_base) * 8;
 
     if(cctx->rgb) {
-        st->codec->codec_id    = AV_CODEC_ID_RAWVIDEO;
+        st->codec->codec_id    = AV_CODEC_ID_R210;
         st->codec->pix_fmt     = AV_PIX_FMT_RGB48;
-        st->codec->codec_tag   = avcodec_pix_fmt_to_codec_tag(AV_PIX_FMT_RGB48);
     } else {
         if (cctx->v210) {
             st->codec->codec_id    = AV_CODEC_ID_V210;
