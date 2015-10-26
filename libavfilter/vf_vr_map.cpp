@@ -2,7 +2,7 @@
 * @Author: BlahGeek
 * @Date:   2015-09-01
 * @Last Modified by:   BlahGeek
-* @Last Modified time: 2015-10-23
+* @Last Modified time: 2015-10-26
 */
 
 #include <stdio.h>
@@ -190,24 +190,44 @@ static const AVOption vr_map_options[] = {
 
 AVFILTER_DEFINE_CLASS(vr_map);
 
+// g++傻逼
+static const AVFilterPad avfilter_vf_vr_map_output_ = {
+    "default", // name
+    AVMEDIA_TYPE_VIDEO, //type
+    0, 0, // deprecated
+    NULL, // start_frame
+    NULL, // get_video_buffer
+    NULL, // get_audio_buffer
+    NULL, // end_frame
+    NULL, // draw_slice
+    NULL, // filter_frame
+    NULL, // poll_frame
+    request_frame, // request_frame
+    config_output, // config_props
+    0, // needs_fifo,
+    0 // needs_writable
+};
+
+static const AVFilterPad avfilter_vf_vr_map_output_empty = {NULL};
+
 static const AVFilterPad avfilter_vf_vr_map_outputs[] = {
-    {
-        .name          = "default",
-        .type          = AVMEDIA_TYPE_VIDEO,
-        .config_props  = config_output,
-        .request_frame = request_frame,
-    },
-    { NULL }
+    avfilter_vf_vr_map_output_,
+    avfilter_vf_vr_map_output_empty,
 };
 
 AVFilter ff_vf_vr_map = {
-    .name          = "vr_map",
-    .description   = NULL_IF_CONFIG_SMALL("VR Mapping"),
-    .priv_size     = sizeof(VRMapContext),
-    .priv_class    = &vr_map_class,
-    .query_formats = query_formats,
-    .init          = init,
-    .uninit        = uninit,
-    .outputs       = avfilter_vf_vr_map_outputs,
-    .flags         = AVFILTER_FLAG_DYNAMIC_INPUTS,
+    "vr_map", // name
+    NULL_IF_CONFIG_SMALL("VR Mapping"), // description
+    NULL, // inputs
+    avfilter_vf_vr_map_outputs, // outputs
+    &vr_map_class, // priv_class
+    AVFILTER_FLAG_DYNAMIC_INPUTS, // flags
+    init, // init
+    NULL, // init_dict
+    uninit, // uninit
+    query_formats, // query_formats
+    sizeof(VRMapContext), // priv_size
+    NULL, // next
+    NULL, // process_command
+    NULL, // init_opaque
 };
