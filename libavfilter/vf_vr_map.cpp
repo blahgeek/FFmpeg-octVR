@@ -2,7 +2,7 @@
 * @Author: BlahGeek
 * @Date:   2015-09-01
 * @Last Modified by:   BlahGeek
-* @Last Modified time: 2015-10-26
+* @Last Modified time: 2015-11-09
 */
 
 #include <stdio.h>
@@ -34,6 +34,7 @@ typedef struct {
     int nb_inputs;
     char * options_file;
     vr::json options;
+    char * data_file;
 
     int out_width, out_height;
     vr::MultiMapper * remapper;
@@ -102,9 +103,17 @@ static int config_input(AVFilterLink *inlink) {
     av_log(ctx, AV_LOG_DEBUG, "config_input: input %d size: %dx%d\n",
            in_no, inlink->w, inlink->h);
 
-    s->remapper->add_input(s->options["inputs"][in_no]["type"],
-                           s->options["inputs"][in_no]["options"],
-                           inlink->w, inlink->h);
+    if(s->options_file) {
+        s->remapper->add_input(s->options["inputs"][in_no]["type"],
+                               s->options["inputs"][in_no]["options"],
+                               inlink->w, inlink->h);
+    } else {
+        cv::Size predefined_size = s->remapper->get_input_size(in_no);
+        av_log(ctx, AV_LOG_DEBUG, "Predefined input size#%d: %dx%d\n",
+               predefined_size.width, predefined_size.height);
+        if(predefined_size != cv::Size(inlink->w, inlink->h))
+            return -1;
+    }
     return 0;
 }
 
@@ -123,14 +132,21 @@ static int init(AVFilterContext *ctx) {
         ff_insert_inpad(ctx, i, &inpad);
     }
 
-    std::ifstream f(s->options_file);
-    s->options << f;
-
     av_assert0(s->remapper == nullptr);
+    av_assert0((s->options_file == NULL) ^ (s->data_file == NULL) == true);
 
-    s->remapper = vr::MultiMapper::New(s->options["output"]["type"],
-                                       s->options["output"]["options"],
-                                       s->out_width, s->out_height);
+    if(s->data_file) {
+        av_assert0(s->out_width == 0 && s->out_height == 0);
+        std::ifstream f(s->data_file);
+        s->remapper = vr::MultiMapper::New(f);
+    } else {
+        std::ifstream f(s->options_file);
+        s->options << f;
+        s->remapper = vr::MultiMapper::New(s->options["output"]["type"],
+                                           s->options["output"]["options"],
+                                           s->out_width, s->out_height);
+    }
+
     auto final_size = s->remapper->get_output_size();
     s->out_width = final_size.width;
     s->out_height = final_size.height;
@@ -183,6 +199,7 @@ static int request_frame(AVFilterLink *outlink) {
 static const AVOption vr_map_options[] = {
     { "inputs", "Number of input streams", OFFSET(nb_inputs), AV_OPT_TYPE_INT, {.i64 = 2}, 1, INT_MAX, FLAGS},
     { "options", "Options (json file)", OFFSET(options_file), AV_OPT_TYPE_STRING, {.str = NULL}, CHAR_MIN, CHAR_MAX, FLAGS},
+    { "data", "Dumped data file", OFFSET(data_file), AV_OPT_TYPE_STRING, {.str = NULL}, CHAR_MIN, CHAR_MAX, FLAGS},
     { "out_width", "Output width", OFFSET(out_width), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS},
     { "out_height", "Output height", OFFSET(out_height), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS},
     { NULL }
