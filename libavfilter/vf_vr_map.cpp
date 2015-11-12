@@ -78,12 +78,16 @@ static int push_frame(AVFilterContext * ctx) {
     for(auto & f: frames)
         in_mats.emplace_back(f->height, f->width, CV_8UC3, f->data[0], f->linesize[0]);
 
-    {
+    if(s->nb_inputs > 1) {
         cv::UMat out_mat_u = out_mat.getUMat(cv::ACCESS_WRITE);
         std::vector<cv::UMat> in_mats_u;
         for(auto & m: in_mats)
             in_mats_u.push_back(m.getUMat(cv::ACCESS_READ));
         s->remapper->get_output(in_mats_u, out_mat_u);
+    } else {
+        cv::UMat out_mat_u = out_mat.getUMat(cv::ACCESS_WRITE);
+        cv::UMat in_mat_u = in_mats.front().getUMat(cv::ACCESS_READ);
+        s->remapper->get_single_output(in_mat_u, out_mat_u);
     }
 
     for(auto f: frames)
