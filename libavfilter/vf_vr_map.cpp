@@ -2,7 +2,7 @@
 * @Author: BlahGeek
 * @Date:   2015-09-01
 * @Last Modified by:   BlahGeek
-* @Last Modified time: 2015-11-09
+* @Last Modified time: 2015-11-12
 */
 
 #include <stdio.h>
@@ -78,7 +78,13 @@ static int push_frame(AVFilterContext * ctx) {
     for(auto & f: frames)
         in_mats.emplace_back(f->height, f->width, CV_8UC3, f->data[0], f->linesize[0]);
 
-    s->remapper->get_output(in_mats, out_mat);
+    {
+        cv::UMat out_mat_u = out_mat.getUMat(cv::ACCESS_WRITE);
+        std::vector<cv::UMat> in_mats_u;
+        for(auto & m: in_mats)
+            in_mats_u.push_back(m.getUMat(cv::ACCESS_READ));
+        s->remapper->get_output(in_mats_u, out_mat_u);
+    }
 
     for(auto f: frames)
         av_frame_free(&f);
