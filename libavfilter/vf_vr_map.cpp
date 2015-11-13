@@ -36,6 +36,9 @@ typedef struct {
     vr::json options;
     char * data_file;
 
+    char * save_data_file;
+    bool save_data_file_done;
+
     int out_width, out_height;
     vr::MultiMapper * remapper;
 
@@ -58,6 +61,13 @@ static int push_frame(AVFilterContext * ctx) {
     if(!std::all_of(s->queues, s->queues + s->nb_inputs,
                     [](struct FFBufQueue &q){ return q.available; }))
         return 0;
+
+    if(!s->save_data_file_done) {
+        av_log(ctx, AV_LOG_INFO, "Saving data file to %s\n", s->save_data_file);
+        std::ofstream data_file(s->save_data_file);
+        s->remapper->dump(data_file);
+        s->save_data_file_done = true;
+    }
 
     vr::Timer timer("FFMpeg Filter");
 
@@ -220,6 +230,7 @@ static const AVOption vr_map_options[] = {
     { "inputs", "Number of input streams", OFFSET(nb_inputs), AV_OPT_TYPE_INT, {.i64 = 2}, 1, INT_MAX, FLAGS},
     { "options", "Options (json file)", OFFSET(options_file), AV_OPT_TYPE_STRING, {.str = NULL}, CHAR_MIN, CHAR_MAX, FLAGS},
     { "data", "Dumped data file", OFFSET(data_file), AV_OPT_TYPE_STRING, {.str = NULL}, CHAR_MIN, CHAR_MAX, FLAGS},
+    { "save_data", "Dump to data file", OFFSET(save_data_file), AV_OPT_TYPE_STRING, {.str = NULL}, CHAR_MIN, CHAR_MAX, FLAGS},
     { "out_width", "Output width", OFFSET(out_width), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS},
     { "out_height", "Output height", OFFSET(out_height), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS},
     { NULL }
