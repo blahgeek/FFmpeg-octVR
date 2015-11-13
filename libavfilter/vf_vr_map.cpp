@@ -2,7 +2,7 @@
 * @Author: BlahGeek
 * @Date:   2015-09-01
 * @Last Modified by:   BlahGeek
-* @Last Modified time: 2015-11-12
+* @Last Modified time: 2015-11-13
 */
 
 #include <stdio.h>
@@ -59,11 +59,15 @@ static int push_frame(AVFilterContext * ctx) {
                     [](struct FFBufQueue &q){ return q.available; }))
         return 0;
 
+    vr::Timer timer("FFMpeg Filter");
+
     std::vector<AVFrame *> frames(s->nb_inputs);
     for(int i = 0 ; i < s->nb_inputs ; i += 1) {
         frames[i] = ff_bufqueue_get(&s->queues[i]);
         av_assert0(frames[i] != nullptr);
     }
+
+    timer.tick("Get frames from buffer");
 
     av_log(ctx, AV_LOG_WARNING, "out: %dx%d\n", s->out_width, s->out_height);
     AVFrame * out = ff_get_video_buffer(ctx->outputs[0], s->out_width, s->out_height);
@@ -78,16 +82,22 @@ static int push_frame(AVFilterContext * ctx) {
     for(auto & f: frames)
         in_mats.emplace_back(f->height, f->width, CV_8UC3, f->data[0], f->linesize[0]);
 
+    timer.tick("Constructing matrics");
+
     if(s->nb_inputs > 1) {
         cv::UMat out_mat_u = out_mat.getUMat(cv::ACCESS_WRITE);
         std::vector<cv::UMat> in_mats_u;
         for(auto & m: in_mats)
             in_mats_u.push_back(m.getUMat(cv::ACCESS_READ));
+        timer.tick("Constructing UMats");
         s->remapper->get_output(in_mats_u, out_mat_u);
+        timer.tick("Get output");
     } else {
         cv::UMat out_mat_u = out_mat.getUMat(cv::ACCESS_WRITE);
         cv::UMat in_mat_u = in_mats.front().getUMat(cv::ACCESS_READ);
+        timer.tick("Constructing UMats");
         s->remapper->get_single_output(in_mat_u, out_mat_u);
+        timer.tick("Get single output");
     }
 
     for(auto f: frames)
