@@ -62,7 +62,7 @@ static int push_frame(AVFilterContext * ctx) {
                     [](struct FFBufQueue &q){ return q.available; }))
         return 0;
 
-    if(!s->save_data_file_done) {
+    if(!s->save_data_file_done && s->save_data_file) {
         av_log(ctx, AV_LOG_INFO, "Saving data file to %s\n", s->save_data_file);
         std::ofstream data_file(s->save_data_file);
         s->remapper->dump(data_file);
