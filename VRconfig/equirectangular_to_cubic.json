@@ -1,0 +1,13 @@
+{
+    "output": {
+        "type": "cubic",
+        "options": {}
+    },
+    "inputs": 
+    [
+        {
+            "type": "equirectangular",
+            "options": {}
+        }
+    ]
+}
