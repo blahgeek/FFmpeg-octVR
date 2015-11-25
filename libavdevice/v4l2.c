@@ -32,6 +32,9 @@
 
 #include "v4l2-common.h"
 #include <dirent.h>
+#include <stdio.h>
+#include <signal.h>
+#include "libavutil/avassert.h"
 
 #if CONFIG_LIBV4L2
 #include <libv4l2.h>
@@ -90,6 +93,9 @@ struct video_data {
     char *framerate;    /**< Set by a private option. */
 
     int use_libv4l2;
+    int slave;          /**< Set by a private option. */
+    int ready;
+
     int (*open_f)(const char *file, int oflag, ...);
     int (*close_f)(int fd);
     int (*dup_f)(int fd);
@@ -829,6 +835,12 @@ static int v4l2_read_probe(AVProbeData *p)
     return 0;
 }
 
+static struct video_data * g_data = NULL;
+static void slave_got_signal (int signal) {
+    if (g_data)
+        g_data->ready = 1;
+}
+
 static int v4l2_read_header(AVFormatContext *ctx)
 {
     struct video_data *s = ctx->priv_data;
@@ -976,6 +988,34 @@ static int v4l2_read_header(AVFormatContext *ctx)
     st->codec->height = s->height;
     if (st->avg_frame_rate.den)
         st->codec->bit_rate = s->frame_size * av_q2d(st->avg_frame_rate) * 8;
+
+    av_log(ctx, AV_LOG_WARNING, "Checking the role(master/slave) of this process... My role is: %d \n", s->slave);
+    if (s->slave) {
+        g_data = s;
+        av_log(ctx, AV_LOG_WARNING, "Waiting for master...\n");
+        signal(SIGUSR1, slave_got_signal);
+        while(!g_data->ready)
+            usleep(1000);
+        g_data = NULL;
+    } else {
+        FILE * fp = popen("pgrep ffmpeg", "r");
+        av_assert0(fp != NULL);
+
+        pid_t myself = getpid();
+        pid_t pids[32]; //FIXME:it's a hack;
+        pid_t pid;
+        int pid_cnt = 0;
+        while (fscanf(fp, "%d", &pid) > 0){
+            if (pid == myself)
+                continue;
+            av_log(ctx, AV_LOG_WARNING, "Sending Signal to PID %d...\n", pid);
+            pids[pid_cnt++] = pid;
+        }
+        pclose(fp);
+        for (int i = 0; i < pid_cnt; ++i){
+            kill(pids[i], SIGUSR1);
+        }
+    }
 
     return 0;
 
@@ -1125,6 +1165,7 @@ static const AVOption options[] = {
     { "abs",          "use absolute timestamps (wall clock)",                     OFFSET(ts_mode),      AV_OPT_TYPE_CONST,  {.i64 = V4L_TS_ABS      }, 0, 2, DEC, "timestamps" },
     { "mono2abs",     "force conversion from monotonic to absolute timestamps",   OFFSET(ts_mode),      AV_OPT_TYPE_CONST,  {.i64 = V4L_TS_MONO2ABS }, 0, 2, DEC, "timestamps" },
     { "use_libv4l2",  "use libv4l2 (v4l-utils) conversion functions",             OFFSET(use_libv4l2),  AV_OPT_TYPE_INT,    {.i64 = 0}, 0, 1, DEC },
+    { "slave",        "wait for master's signal",                                 OFFSET(slave),        AV_OPT_TYPE_INT,    {.i64 = 0}, 0, 1, DEC },
     { NULL },
 };
 
