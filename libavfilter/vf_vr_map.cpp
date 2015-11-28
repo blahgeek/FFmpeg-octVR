@@ -2,7 +2,7 @@
 * @Author: BlahGeek
 * @Date:   2015-09-01
 * @Last Modified by:   BlahGeek
-* @Last Modified time: 2015-11-13
+* @Last Modified time: 2015-11-29
 */
 
 #include <stdio.h>
@@ -28,16 +28,13 @@ extern "C" {
 #include <algorithm>
 #include "libmap.hpp"
 
+#include "opencv2/core/cuda.hpp"
+
 typedef struct {
     const AVClass *avclass;
 
     int nb_inputs;
-    char * options_file;
-    vr::json options;
     char * data_file;
-
-    char * save_data_file;
-    bool save_data_file_done;
 
     int out_width, out_height;
     vr::MultiMapper * remapper;
@@ -48,8 +45,17 @@ typedef struct {
 static int query_formats(AVFilterContext *ctx)
 {
     AVFilterFormats *formats = NULL;
-    ff_add_format(&formats, AV_PIX_FMT_BGR24); // for OpenCV
-    return ff_set_common_formats(ctx, formats);
+    ff_add_format(&formats, AV_PIX_FMT_BGRA); // for OpenCV
+    for(int i = 0 ; i < ctx->nb_inputs; i += 1) {
+        if(ctx->inputs[i] && !ctx->inputs[i]->out_formats)
+            ff_formats_ref(formats, &ctx->inputs[i]->out_formats);
+    }
+
+    AVFilterFormats *oformats = NULL;
+    ff_add_format(&oformats, AV_PIX_FMT_BGR24);
+    ff_formats_ref(oformats, &ctx->outputs[0]->in_formats);
+
+    return 0;
 }
 
 static int push_frame(AVFilterContext * ctx) {
@@ -61,13 +67,6 @@ static int push_frame(AVFilterContext * ctx) {
     if(!std::all_of(s->queues, s->queues + s->nb_inputs,
                     [](struct FFBufQueue &q){ return q.available; }))
         return 0;
-
-    if(!s->save_data_file_done && s->save_data_file) {
-        av_log(ctx, AV_LOG_INFO, "Saving data file to %s\n", s->save_data_file);
-        std::ofstream data_file(s->save_data_file);
-        s->remapper->dump(data_file);
-        s->save_data_file_done = true;
-    }
 
     vr::Timer timer("FFMpeg Filter");
 
@@ -88,27 +87,15 @@ static int push_frame(AVFilterContext * ctx) {
     av_assert0(out->data[1] == nullptr);
     cv::Mat out_mat(s->out_height, s->out_width, CV_8UC3, out->data[0], out->linesize[0]);
 
-    std::vector<cv::Mat> in_mats;
-    for(auto & f: frames)
-        in_mats.emplace_back(f->height, f->width, CV_8UC3, f->data[0], f->linesize[0]);
+    std::vector<cv::cuda::HostMem> in_mats(frames.size());
+    for(int i = 0 ; i < frames.size() ; i += 1) {
+        auto & f = frames[i];
+        cv::Mat(f->height, f->width, CV_8UC4, f->data[0], f->linesize[0]).copyTo(in_mats[i]);
+    }
 
     timer.tick("Constructing matrics");
 
-    if(s->nb_inputs > 1) {
-        cv::UMat out_mat_u = out_mat.getUMat(cv::ACCESS_WRITE);
-        std::vector<cv::UMat> in_mats_u;
-        for(auto & m: in_mats)
-            in_mats_u.push_back(m.getUMat(cv::ACCESS_READ));
-        timer.tick("Constructing UMats");
-        s->remapper->get_output(in_mats_u, out_mat_u);
-        timer.tick("Get output");
-    } else {
-        cv::UMat out_mat_u = out_mat.getUMat(cv::ACCESS_WRITE);
-        cv::UMat in_mat_u = in_mats.front().getUMat(cv::ACCESS_READ);
-        timer.tick("Constructing UMats");
-        s->remapper->get_single_output(in_mat_u, out_mat_u);
-        timer.tick("Get single output");
-    }
+    s->remapper->get_output(in_mats, out_mat);
 
     for(auto f: frames)
         av_frame_free(&f);
@@ -133,17 +120,6 @@ static int config_input(AVFilterLink *inlink) {
     av_log(ctx, AV_LOG_DEBUG, "config_input: input %d size: %dx%d\n",
            in_no, inlink->w, inlink->h);
 
-    if(s->options_file) {
-        s->remapper->add_input(s->options["inputs"][in_no]["type"],
-                               s->options["inputs"][in_no]["options"],
-                               inlink->w, inlink->h);
-    } else {
-        cv::Size predefined_size = s->remapper->get_input_size(in_no);
-        av_log(ctx, AV_LOG_DEBUG, "Predefined input size#%d: %dx%d\n",
-               predefined_size.width, predefined_size.height);
-        if(predefined_size != cv::Size(inlink->w, inlink->h))
-            return -1;
-    }
     return 0;
 }
 
@@ -163,19 +139,13 @@ static int init(AVFilterContext *ctx) {
     }
 
     av_assert0(s->remapper == nullptr);
-    av_assert0((s->options_file == NULL) ^ (s->data_file == NULL) == true);
+    av_assert0(s->data_file);
 
-    if(s->data_file) {
-        av_assert0(s->out_width == 0 && s->out_height == 0);
-        std::ifstream f(s->data_file);
-        s->remapper = vr::MultiMapper::New(f);
-    } else {
-        std::ifstream f(s->options_file);
-        s->options << f;
-        s->remapper = vr::MultiMapper::New(s->options["output"]["type"],
-                                           s->options["output"]["options"],
-                                           s->out_width, s->out_height);
-    }
+    std::ifstream f(s->data_file);
+    s->remapper = vr::MultiMapper::New(f);
+    av_log(ctx, AV_LOG_INFO, "Init remapper done, preparing...\n");
+    s->remapper->prepare();
+    av_log(ctx, AV_LOG_INFO, "Prepare done\n");
 
     auto final_size = s->remapper->get_output_size();
     s->out_width = final_size.width;
@@ -228,11 +198,7 @@ static int request_frame(AVFilterLink *outlink) {
 
 static const AVOption vr_map_options[] = {
     { "inputs", "Number of input streams", OFFSET(nb_inputs), AV_OPT_TYPE_INT, {.i64 = 2}, 1, INT_MAX, FLAGS},
-    { "options", "Options (json file)", OFFSET(options_file), AV_OPT_TYPE_STRING, {.str = NULL}, CHAR_MIN, CHAR_MAX, FLAGS},
     { "data", "Dumped data file", OFFSET(data_file), AV_OPT_TYPE_STRING, {.str = NULL}, CHAR_MIN, CHAR_MAX, FLAGS},
-    { "save_data", "Dump to data file", OFFSET(save_data_file), AV_OPT_TYPE_STRING, {.str = NULL}, CHAR_MIN, CHAR_MAX, FLAGS},
-    { "out_width", "Output width", OFFSET(out_width), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS},
-    { "out_height", "Output height", OFFSET(out_height), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS},
     { NULL }
 };
 
