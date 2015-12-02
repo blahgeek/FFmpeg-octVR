@@ -38,6 +38,11 @@ typedef struct {
 
     int out_width, out_height;
     vr::MultiMapper * remapper;
+    vr::AsyncMultiMapper * async_remapper;
+
+    cv::Size * in_sizes;
+
+    AVFrame ** last_frames;
 
     struct FFBufQueue *queues;
 } VRMapContext;
@@ -87,19 +92,32 @@ static int push_frame(AVFilterContext * ctx) {
     av_assert0(out->data[1] == nullptr);
     cv::Mat out_mat(s->out_height, s->out_width, CV_8UC3, out->data[0], out->linesize[0]);
 
-    std::vector<cv::cuda::HostMem> in_mats(frames.size());
+    std::vector<cv::Mat> in_mats;
     for(int i = 0 ; i < frames.size() ; i += 1) {
         auto & f = frames[i];
-        cv::Mat(f->height, f->width, CV_8UC4, f->data[0], f->linesize[0]).copyTo(in_mats[i]);
+        in_mats.emplace_back(f->height, f->width, CV_8UC4, f->data[0], f->linesize[0]);
     }
 
     timer.tick("Constructing matrics");
+    
+    s->async_remapper->push(in_mats, out_mat);
 
-    s->remapper->get_output(in_mats, out_mat);
+    AVFrame * real_out = NULL;
+    if(s->last_frames == NULL) {
+        real_out = ff_get_video_buffer(ctx->outputs[0], s->out_width, s->out_height);
+        s->last_frames = new AVFrame * [s->nb_inputs + 1];
+    } else {
+        s->async_remapper->pop();
+        real_out = s->last_frames[s->nb_inputs];
+        for(int i = 0 ; i < s->nb_inputs ; i += 1)
+            av_frame_free(&s->last_frames[i]);
+    }
 
-    for(auto f: frames)
-        av_frame_free(&f);
-    return ff_filter_frame(ctx->outputs[0], out);
+    for(int i = 0 ; i < s->nb_inputs ; i += 1)
+        s->last_frames[i] = frames[i];
+    s->last_frames[s->nb_inputs] = out;
+
+    return ff_filter_frame(ctx->outputs[0], real_out);
 }
 
 static int filter_frame(AVFilterLink *inlink, AVFrame * frame) {
@@ -119,6 +137,13 @@ static int config_input(AVFilterLink *inlink) {
     unsigned in_no = FF_INLINK_IDX(inlink);
     av_log(ctx, AV_LOG_DEBUG, "config_input: input %d size: %dx%d\n",
            in_no, inlink->w, inlink->h);
+    s->in_sizes[in_no] = cv::Size(inlink->w, inlink->h);
+
+    if(in_no == s->nb_inputs - 1) {
+        s->async_remapper = vr::AsyncMultiMapper::New(s->remapper, 
+                std::vector<cv::Size>(s->in_sizes, s->in_sizes + s->nb_inputs));
+        av_log(ctx, AV_LOG_INFO, "Init async remapper done\n");
+    }
 
     return 0;
 }
@@ -138,14 +163,14 @@ static int init(AVFilterContext *ctx) {
         ff_insert_inpad(ctx, i, &inpad);
     }
 
+    s->in_sizes = new cv::Size [s->nb_inputs];
+
     av_assert0(s->remapper == nullptr);
     av_assert0(s->data_file);
 
     std::ifstream f(s->data_file);
     s->remapper = vr::MultiMapper::New(f);
-    av_log(ctx, AV_LOG_INFO, "Init remapper done, preparing...\n");
-    s->remapper->prepare();
-    av_log(ctx, AV_LOG_INFO, "Prepare done\n");
+    av_log(ctx, AV_LOG_INFO, "Init remapper done\n");
 
     auto final_size = s->remapper->get_output_size();
     s->out_width = final_size.width;
@@ -158,16 +183,22 @@ static int init(AVFilterContext *ctx) {
 }
 
 static void uninit(AVFilterContext *ctx) {
+    av_log(ctx, AV_LOG_INFO, "uniniting...\n");
+
     VRMapContext *s = static_cast<VRMapContext *>(ctx->priv);
     for(int i = 0 ; i < s->nb_inputs ; i += 1) {
         ff_bufqueue_discard_all(&s->queues[i]);
         av_freep(&s->queues[i]);
         av_freep(&ctx->input_pads[i].name);
     }
-    if(s->remapper) {
-        delete s->remapper;
-        s->remapper = NULL;
-    }
+    //if(s->remapper) {
+        //delete s->remapper;
+        //s->remapper = NULL;
+    //}
+    //if(s->async_remapper) {
+        //delete s->async_remapper;
+        //s->async_remapper = NULL;
+    //}
 }
 
 static int config_output(AVFilterLink *link)
