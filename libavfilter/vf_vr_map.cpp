@@ -36,6 +36,8 @@ typedef struct {
     int nb_inputs;
     char * data_file;
 
+    int crop_x, crop_w;
+
     int out_width, out_height;
     vr::MultiMapper * remapper;
     vr::AsyncMultiMapper * async_remapper;
@@ -50,14 +52,14 @@ typedef struct {
 static int query_formats(AVFilterContext *ctx)
 {
     AVFilterFormats *formats = NULL;
-    ff_add_format(&formats, AV_PIX_FMT_BGRA); // for OpenCV
+    ff_add_format(&formats, AV_PIX_FMT_RGB24); // for OpenCV
     for(int i = 0 ; i < ctx->nb_inputs; i += 1) {
         if(ctx->inputs[i] && !ctx->inputs[i]->out_formats)
             ff_formats_ref(formats, &ctx->inputs[i]->out_formats);
     }
 
     AVFilterFormats *oformats = NULL;
-    ff_add_format(&oformats, AV_PIX_FMT_BGR24);
+    ff_add_format(&oformats, AV_PIX_FMT_RGB24);
     ff_formats_ref(oformats, &ctx->outputs[0]->in_formats);
 
     return 0;
@@ -95,7 +97,11 @@ static int push_frame(AVFilterContext * ctx) {
     std::vector<cv::Mat> in_mats;
     for(int i = 0 ; i < frames.size() ; i += 1) {
         auto & f = frames[i];
-        in_mats.emplace_back(f->height, f->width, CV_8UC4, f->data[0], f->linesize[0]);
+        int real_w = s->crop_w != 0 ? s->crop_w : f->width;
+        in_mats.emplace_back(f->height, real_w,
+                             CV_8UC3, 
+                             f->data[0] + s->crop_x * 3, 
+                             f->linesize[0]);
     }
 
     timer.tick("Constructing matrics");
@@ -137,11 +143,14 @@ static int config_input(AVFilterLink *inlink) {
     unsigned in_no = FF_INLINK_IDX(inlink);
     av_log(ctx, AV_LOG_DEBUG, "config_input: input %d size: %dx%d\n",
            in_no, inlink->w, inlink->h);
-    s->in_sizes[in_no] = cv::Size(inlink->w, inlink->h);
+    if(s->crop_w != 0)
+        av_log(ctx, AV_LOG_WARNING, "Using width %d for input %d\n", s->crop_w, in_no);
+    s->in_sizes[in_no] = cv::Size(s->crop_w != 0 ? s->crop_w : inlink->w, inlink->h);
 
     if(in_no == s->nb_inputs - 1) {
-        s->async_remapper = vr::AsyncMultiMapper::New(s->remapper, 
-                std::vector<cv::Size>(s->in_sizes, s->in_sizes + s->nb_inputs));
+        std::vector<cv::Size> _sizes(s->in_sizes, s->in_sizes + s->nb_inputs);
+        s->remapper->prepare(_sizes);
+        s->async_remapper = vr::AsyncMultiMapper::New(s->remapper, _sizes);
         av_log(ctx, AV_LOG_INFO, "Init async remapper done\n");
     }
 
@@ -191,14 +200,14 @@ static void uninit(AVFilterContext *ctx) {
         av_freep(&s->queues[i]);
         av_freep(&ctx->input_pads[i].name);
     }
-    //if(s->remapper) {
-        //delete s->remapper;
-        //s->remapper = NULL;
-    //}
-    //if(s->async_remapper) {
-        //delete s->async_remapper;
-        //s->async_remapper = NULL;
-    //}
+    if(s->remapper) {
+        delete s->remapper;
+        s->remapper = NULL;
+    }
+    if(s->async_remapper) {
+        delete s->async_remapper;
+        s->async_remapper = NULL;
+    }
 }
 
 static int config_output(AVFilterLink *link)
@@ -230,6 +239,8 @@ static int request_frame(AVFilterLink *outlink) {
 static const AVOption vr_map_options[] = {
     { "inputs", "Number of input streams", OFFSET(nb_inputs), AV_OPT_TYPE_INT, {.i64 = 2}, 1, INT_MAX, FLAGS},
     { "data", "Dumped data file", OFFSET(data_file), AV_OPT_TYPE_STRING, {.str = NULL}, CHAR_MIN, CHAR_MAX, FLAGS},
+    { "crop_x", "Crop X", OFFSET(crop_x), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS},
+    { "crop_w", "Crop width", OFFSET(crop_w), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS},
     { NULL }
 };
 
