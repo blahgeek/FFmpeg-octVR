@@ -35,6 +35,7 @@ typedef struct {
 
     int nb_inputs;
     char * output_templates;
+    int blend;
 
     int crop_x, crop_w;
 
@@ -164,7 +165,7 @@ static int config_input(AVFilterLink *inlink) {
         for(int i = 0 ; i < s->nb_outputs ; i += 1)
             _templates.push_back(*s->mapper_templates[i]);
         std::vector<cv::Size> _sizes(s->in_sizes, s->in_sizes + s->nb_inputs);
-        s->async_remapper = vr::AsyncMultiMapper::New(_templates, _sizes);
+        s->async_remapper = vr::AsyncMultiMapper::New(_templates, _sizes, s->blend == 1);
         av_log(ctx, AV_LOG_INFO, "Init async remapper done\n");
     }
 
@@ -270,6 +271,7 @@ static const AVOption vr_map_options[] = {
     { "outputs", "comma-seperated output templates", OFFSET(output_templates), AV_OPT_TYPE_STRING, {.str = NULL}, CHAR_MIN, CHAR_MAX, FLAGS},
     { "crop_x", "Crop X", OFFSET(crop_x), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS},
     { "crop_w", "Crop width", OFFSET(crop_w), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS},
+    { "blend", "Do blending?", OFFSET(blend), AV_OPT_TYPE_INT, {.i64 = 1}, 0, 1, FLAGS},
     { NULL }
 };
 
