@@ -39,7 +39,7 @@ typedef struct {
     int crop_x, crop_w;
 
     int out_width, out_height;
-    vr::MultiMapper * remapper;
+    vr::MapperTemplate * mapper_template;
     vr::AsyncMultiMapper * async_remapper;
 
     cv::Size * in_sizes;
@@ -149,8 +149,7 @@ static int config_input(AVFilterLink *inlink) {
 
     if(in_no == s->nb_inputs - 1) {
         std::vector<cv::Size> _sizes(s->in_sizes, s->in_sizes + s->nb_inputs);
-        s->remapper->prepare(_sizes);
-        s->async_remapper = vr::AsyncMultiMapper::New(s->remapper, _sizes);
+        s->async_remapper = vr::AsyncMultiMapper::New(*s->mapper_template, _sizes);
         av_log(ctx, AV_LOG_INFO, "Init async remapper done\n");
     }
 
@@ -174,14 +173,14 @@ static int init(AVFilterContext *ctx) {
 
     s->in_sizes = new cv::Size [s->nb_inputs];
 
-    av_assert0(s->remapper == nullptr);
+    av_assert0(s->mapper_template == nullptr);
     av_assert0(s->data_file);
 
     std::ifstream f(s->data_file);
-    s->remapper = vr::MultiMapper::New(f);
-    av_log(ctx, AV_LOG_INFO, "Init remapper done\n");
+    s->mapper_template = new vr::MapperTemplate(f);
+    av_log(ctx, AV_LOG_INFO, "Load template done\n");
 
-    auto final_size = s->remapper->get_output_size();
+    auto final_size = s->mapper_template->out_size;
     s->out_width = final_size.width;
     s->out_height = final_size.height;
 
@@ -200,9 +199,9 @@ static void uninit(AVFilterContext *ctx) {
         av_freep(&s->queues[i]);
         av_freep(&ctx->input_pads[i].name);
     }
-    if(s->remapper) {
-        delete s->remapper;
-        s->remapper = NULL;
+    if(s->mapper_template) {
+        delete s->mapper_template;
+        s->mapper_template = NULL;
     }
     if(s->async_remapper) {
         delete s->async_remapper;
