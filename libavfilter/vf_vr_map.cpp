@@ -219,16 +219,18 @@ static int init(AVFilterContext *ctx) {
     av_assert0(s->output_templates != NULL);
     std::string output_strings(s->output_templates);
     std::vector<int> output_strings_seq_pos;
-    for(int i = 0 ; i < output_strings.size() ; i += 1)
+    for(int i = 0 ; i < output_strings.size() ; i += 1) {
         if(output_strings[i] == '|')
             output_strings_seq_pos.push_back(i);
+    }
     output_strings_seq_pos.push_back(output_strings.size());
 
     s->nb_outputs = output_strings_seq_pos.size();
     s->mapper_templates = new vr::MapperTemplate * [s->nb_outputs];
     for(int i = 0 ; i < output_strings_seq_pos.size() ; i += 1) {
-        std::string filename = output_strings.substr(i == 0 ? 0 : (output_strings_seq_pos[i-1] + 1), 
-                                                     output_strings_seq_pos[i]);
+        int start = i == 0 ? 0 : (output_strings_seq_pos[i-1] + 1);
+        int stop = output_strings_seq_pos[i];
+        std::string filename = output_strings.substr(start, stop-start);
         av_log(ctx, AV_LOG_INFO, "Loading template %s\n", filename.c_str());
         std::ifstream f(filename.c_str());
         s->mapper_templates[i] = new vr::MapperTemplate(f);
