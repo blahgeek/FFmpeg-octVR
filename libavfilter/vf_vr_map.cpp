@@ -116,9 +116,10 @@ static int push_frame(AVFilterContext * ctx) {
     AVFrame ** real_out_frames = new AVFrame * [s->nb_outputs];
     if(s->last_frames == NULL) {
         for(int i = 0 ; i < s->nb_outputs ; i += 1)
-            real_out_frames[i] = ff_get_video_buffer(ctx->outputs[i],
-                                                     s->mapper_templates[i]->out_size.width,
-                                                     s->mapper_templates[i]->out_size.height);
+            real_out_frames[i] = NULL;
+            //real_out_frames[i] = ff_get_video_buffer(ctx->outputs[i],
+                                                     //s->mapper_templates[i]->out_size.width,
+                                                     //s->mapper_templates[i]->out_size.height);
         s->last_frames = new AVFrame *[s->nb_inputs + s->nb_outputs];
     } else {
         s->async_remapper->pop();
@@ -134,7 +135,10 @@ static int push_frame(AVFilterContext * ctx) {
         s->last_frames[s->nb_inputs + i] = out_frames[i];
 
     for(int i = 0 ; i < s->nb_outputs ; i += 1)
-        ff_filter_frame(ctx->outputs[i], real_out_frames[i]);
+        if(real_out_frames[i])
+            ff_filter_frame(ctx->outputs[i], real_out_frames[i]);
+
+    delete [] real_out_frames;
 
     return 0;
 }
