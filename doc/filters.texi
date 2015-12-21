@@ -1032,7 +1032,7 @@ Number_of_samples
 For example full key look like this @code{lavfi.astats.1.DC_offset} or
 this @code{lavfi.astats.Overall.Peak_count}.
 
-For description what each key means read bellow.
+For description what each key means read below.
 
 @item reset
 Set number of frame after which stats are going to be recalculated.
@@ -2199,7 +2199,7 @@ Amount of milliseconds the signal has to rise above the threshold before gain
 reduction starts. Default is 20. Range is between 0.01 and 2000.
 
 @item release
-Amount of milliseconds the signal has to fall bellow the threshold before
+Amount of milliseconds the signal has to fall below the threshold before
 reduction is decreased again. Default is 250. Range is between 0.01 and 9000.
 
 @item makeup
@@ -4118,7 +4118,7 @@ It accepts the following options:
 @item threshold1
 @item threshold2
 @item threshold3
-Allows to limit the maximum change for each plane, default is 65535.
+Limit the maximum change for each plane, default is 65535.
 If 0, plane will remain unchanged.
 @end table
 
@@ -4321,7 +4321,7 @@ It accepts the following options:
 @item threshold1
 @item threshold2
 @item threshold3
-Allows to limit the maximum change for each plane, default is 65535.
+Limit the maximum change for each plane, default is 65535.
 If 0, plane will remain unchanged.
 
 @item coordinates
@@ -4496,6 +4496,9 @@ Replace old columns with new ones.
 
 @item scroll
 Scroll from right to left.
+
+@item rscroll
+Scroll from left to right.
 @end table
 
 Default is @code{frame}.
@@ -4964,7 +4967,7 @@ within the parameter list.
 @item
 Show the text at the center of the video frame:
 @example
-drawtext="fontsize=30:fontfile=FreeSerif.ttf:text='hello world':x=(w-text_w)/2:y=(h-text_h-line_h)/2"
+drawtext="fontsize=30:fontfile=FreeSerif.ttf:text='hello world':x=(w-text_w)/2:y=(h-text_h)/2"
 @end example
 
 @item
@@ -5203,7 +5206,7 @@ It accepts the following options:
 @item threshold1
 @item threshold2
 @item threshold3
-Allows to limit the maximum change for each plane, default is 65535.
+Limit the maximum change for each plane, default is 65535.
 If 0, plane will remain unchanged.
 
 @item coordinates
@@ -5279,6 +5282,10 @@ computation time. Default value is 1.
 Set a random seed, must be an integer included between 0 and
 UINT32_MAX. If not specified, or if explicitly set to -1, the filter
 will try to use a good random seed on a best effort basis.
+
+@item pal8
+Set pal8 output pixel format. This option does not work with codebook
+length greater than 256.
 @end table
 
 @section fade
@@ -5476,8 +5483,9 @@ which @code{fieldmatch} is based on. While the semantic and usage are very
 close, some behaviour and options names can differ.
 
 The @ref{decimate} filter currently only works for constant frame rate input.
-Do not use @code{fieldmatch} and @ref{decimate} if your input has mixed
-telecined and progressive content with changing framerate.
+If your input has mixed telecined (30fps) and progressive content with a lower
+framerate like 24fps use the following filterchain to produce the necessary cfr
+stream: @code{dejudder,fps=30000/1001,fieldmatch,decimate}.
 
 The filter accepts the following options:
 
@@ -6892,7 +6900,7 @@ It accepts the following options:
 @item threshold1
 @item threshold2
 @item threshold3
-Allows to limit the maximum change for each plane, default is 65535.
+Limit the maximum change for each plane, default is 65535.
 If 0, plane will remain unchanged.
 @end table
 
@@ -9873,7 +9881,7 @@ stereo3d=sbsl:aybd
 @end example
 
 @item
-Convert input video from above bellow (left eye above, right eye below) to side by side crosseye.
+Convert input video from above below (left eye above, right eye below) to side by side crosseye.
 @example
 stereo3d=abl:sbsr
 @end example
@@ -9938,6 +9946,10 @@ was composed. For the syntax of this option, check the
 @ref{video size syntax,,"Video size" section in the ffmpeg-utils manual,ffmpeg-utils}.
 Due to a misdesign in ASS aspect ratio arithmetic, this is necessary to
 correctly scale the fonts if the aspect ratio has been changed.
+
+@item fontsdir
+Set a directory path containing fonts that can be used by the filter.
+These fonts will be used in addition to whatever the font provider uses.
 
 @item charenc
 Set subtitles input character encoding. @code{subtitles} filter only. Only
@@ -11047,7 +11059,7 @@ color component value = 0 and bottom side represents value = 255.
 @item intensity, i
 Set intensity. Smaller values are useful to find out how many values of the same
 luminance are distributed across input rows/columns.
-Default value is @code{10}. Allowed range is [1, 255].
+Default value is @code{0.04}. Allowed range is [0, 1].
 
 @item mirror, r
 Set mirroring mode. @code{0} means unmirrored, @code{1} means mirrored.
@@ -11101,6 +11113,27 @@ can still spot out of range values without constantly looking at waveforms.
 
 @item peak+instant
 Peak and instant envelope combined together.
+@end table
+
+@item filter, f
+@table @samp
+@item lowpass
+No filtering, this is default.
+
+@item flat
+Luma and chroma combined together.
+
+@item aflat
+Similar as above, but shows difference between blue and red chroma.
+
+@item chroma
+Displays only chroma.
+
+@item achroma
+Similar as above, but shows difference between blue and red chroma.
+
+@item color
+Displays actual color value on waveform.
 @end table
 @end table
 

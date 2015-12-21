@@ -1012,7 +1012,8 @@ typedef struct VScalerContext
 } VScalerContext;
 
 // warp input lines in the form (src + width*i + j) to slice format (line[i][j])
-int ff_init_slice_from_src(SwsSlice * s, uint8_t *src[4], int stride[4], int srcW, int lumY, int lumH, int chrY, int chrH);
+// relative=true means first line src[x][0] otherwise first line is src[x][lum/crh Y]
+int ff_init_slice_from_src(SwsSlice * s, uint8_t *src[4], int stride[4], int srcW, int lumY, int lumH, int chrY, int chrH, int relative);
 
 // Initialize scaler filter descriptor chain
 int ff_init_filters(SwsContext *c);
@@ -1027,6 +1028,9 @@ int ff_free_filters(SwsContext *c);
  It applies the same procedure for @chr lines.
 */
 int ff_rotate_slice(SwsSlice *s, int lum, int chr);
+
+/// initializes gamma conversion descriptor
+int ff_init_gamma_convert(SwsFilterDescriptor *desc, SwsSlice * src, uint16_t *table);
 
 /// initializes lum pixel format conversion descriptor
 int ff_init_desc_fmt_convert(SwsFilterDescriptor *desc, SwsSlice * src, SwsSlice *dst, uint32_t *pal);

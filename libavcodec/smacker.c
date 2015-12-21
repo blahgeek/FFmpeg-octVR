@@ -316,7 +316,9 @@ static int decode_header_trees(SmackVContext *smk) {
     full_size = AV_RL32(smk->avctx->extradata + 8);
     type_size = AV_RL32(smk->avctx->extradata + 12);
 
-    init_get_bits8(&gb, smk->avctx->extradata + 16, smk->avctx->extradata_size - 16);
+    ret = init_get_bits8(&gb, smk->avctx->extradata + 16, smk->avctx->extradata_size - 16);
+    if (ret < 0)
+        return ret;
 
     if(!get_bits1(&gb)) {
         av_log(smk->avctx, AV_LOG_INFO, "Skipping MMAP tree\n");
@@ -668,6 +670,10 @@ static int smka_decode_frame(AVCodecContext *avctx, void *data,
 
     /* get output buffer */
     frame->nb_samples = unp_size / (avctx->channels * (bits + 1));
+    if (unp_size % (avctx->channels * (bits + 1))) {
+        av_log(avctx, AV_LOG_ERROR, "unp_size %d is odd\n", unp_size);
+        return AVERROR(EINVAL);
+    }
     if ((ret = ff_get_buffer(avctx, frame, 0)) < 0)
         return ret;
     samples  = (int16_t *)frame->data[0];

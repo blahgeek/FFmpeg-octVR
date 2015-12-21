@@ -2447,6 +2447,9 @@ static void print_sdp(void)
         }
     }
 
+    if (!j)
+        goto fail;
+
     av_sdp_create(avc, j, sdp, sizeof(sdp));
 
     if (!sdp_filename) {
@@ -2462,6 +2465,7 @@ static void print_sdp(void)
         }
     }
 
+fail:
     av_freep(&avc);
 }
 
@@ -2914,7 +2918,7 @@ static int transcode_init(void)
                 enc_ctx->time_base = dec_ctx->time_base;
             }
 
-            if (ist && !ost->frame_rate.num)
+            if (!ost->frame_rate.num)
                 ost->frame_rate = ist->framerate;
             if(ost->frame_rate.num)
                 enc_ctx->time_base = av_inv_q(ost->frame_rate);

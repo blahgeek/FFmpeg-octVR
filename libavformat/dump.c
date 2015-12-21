@@ -423,8 +423,8 @@ static void dump_stream_format(AVFormatContext *ic, int i,
         av_cmp_q(st->sample_aspect_ratio, st->codec->sample_aspect_ratio)) {
         AVRational display_aspect_ratio;
         av_reduce(&display_aspect_ratio.num, &display_aspect_ratio.den,
-                  st->codec->width  * st->sample_aspect_ratio.num,
-                  st->codec->height * st->sample_aspect_ratio.den,
+                  st->codec->width  * (int64_t)st->sample_aspect_ratio.num,
+                  st->codec->height * (int64_t)st->sample_aspect_ratio.den,
                   1024 * 1024);
         av_log(NULL, AV_LOG_INFO, ", SAR %d:%d DAR %d:%d",
                st->sample_aspect_ratio.num, st->sample_aspect_ratio.den,
@@ -496,7 +496,7 @@ void av_dump_format(AVFormatContext *ic, int index,
         av_log(NULL, AV_LOG_INFO, "  Duration: ");
         if (ic->duration != AV_NOPTS_VALUE) {
             int hours, mins, secs, us;
-            int64_t duration = ic->duration + 5000;
+            int64_t duration = ic->duration + (ic->duration <= INT64_MAX - 5000 ? 5000 : 0);
             secs  = duration / AV_TIME_BASE;
             us    = duration % AV_TIME_BASE;
             mins  = secs / 60;

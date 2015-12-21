@@ -744,7 +744,7 @@ static int hls_slice_header(HEVCContext *s)
             av_freep(&sh->entry_point_offset);
             av_freep(&sh->offset);
             av_freep(&sh->size);
-            sh->entry_point_offset = av_malloc_array(sh->num_entry_point_offsets, sizeof(int));
+            sh->entry_point_offset = av_malloc_array(sh->num_entry_point_offsets, sizeof(unsigned));
             sh->offset = av_malloc_array(sh->num_entry_point_offsets, sizeof(int));
             sh->size = av_malloc_array(sh->num_entry_point_offsets, sizeof(int));
             if (!sh->entry_point_offset || !sh->offset || !sh->size) {
@@ -808,6 +808,8 @@ static int hls_slice_header(HEVCContext *s)
     s->slice_initialized = 1;
     s->HEVClc->tu.cu_qp_offset_cb = 0;
     s->HEVClc->tu.cu_qp_offset_cr = 0;
+
+    s->no_rasl_output_flag = IS_IDR(s) || IS_BLA(s) || (s->nal_unit_type == NAL_CRA_NUT && s->last_eos);
 
     return 0;
 }
@@ -2438,8 +2440,8 @@ static int hls_slice_data_wpp(HEVCContext *s, const HEVCNAL *nal)
     HEVCLocalContext *lc = s->HEVClc;
     int *ret = av_malloc_array(s->sh.num_entry_point_offsets + 1, sizeof(int));
     int *arg = av_malloc_array(s->sh.num_entry_point_offsets + 1, sizeof(int));
-    int offset;
-    int startheader, cmpt = 0;
+    int64_t offset;
+    int64_t startheader, cmpt = 0;
     int i, j, res = 0;
 
     if (!ret || !arg) {
@@ -2448,11 +2450,18 @@ static int hls_slice_data_wpp(HEVCContext *s, const HEVCNAL *nal)
         return AVERROR(ENOMEM);
     }
 
+    if (s->sh.slice_ctb_addr_rs + s->sh.num_entry_point_offsets * s->ps.sps->ctb_width >= s->ps.sps->ctb_width * s->ps.sps->ctb_height) {
+        av_log(s->avctx, AV_LOG_ERROR, "WPP ctb addresses are wrong (%d %d %d %d)\n",
+            s->sh.slice_ctb_addr_rs, s->sh.num_entry_point_offsets,
+            s->ps.sps->ctb_width, s->ps.sps->ctb_height
+        );
+        res = AVERROR_INVALIDDATA;
+        goto error;
+    }
+
+    ff_alloc_entries(s->avctx, s->sh.num_entry_point_offsets + 1);
 
     if (!s->sList[1]) {
-        ff_alloc_entries(s->avctx, s->sh.num_entry_point_offsets + 1);
-
-
         for (i = 1; i < s->threads_number; i++) {
             s->sList[i] = av_malloc(sizeof(HEVCContext));
             memcpy(s->sList[i], s, sizeof(HEVCContext));
@@ -2485,6 +2494,11 @@ static int hls_slice_data_wpp(HEVCContext *s, const HEVCNAL *nal)
     }
     if (s->sh.num_entry_point_offsets != 0) {
         offset += s->sh.entry_point_offset[s->sh.num_entry_point_offsets - 1] - cmpt;
+        if (length < offset) {
+            av_log(s->avctx, AV_LOG_ERROR, "entry_point_offset table is corrupted\n");
+            res = AVERROR_INVALIDDATA;
+            goto error;
+        }
         s->sh.size[s->sh.num_entry_point_offsets - 1] = length - offset;
         s->sh.offset[s->sh.num_entry_point_offsets - 1] = offset;
 
@@ -2511,6 +2525,7 @@ static int hls_slice_data_wpp(HEVCContext *s, const HEVCNAL *nal)
 
     for (i = 0; i <= s->sh.num_entry_point_offsets; i++)
         res += ret[i];
+error:
     av_free(ret);
     av_free(arg);
     return res;
@@ -3135,6 +3150,7 @@ static int hevc_update_thread_context(AVCodecContext *dst,
     s->pocTid0    = s0->pocTid0;
     s->max_ra     = s0->max_ra;
     s->eos        = s0->eos;
+    s->no_rasl_output_flag = s0->no_rasl_output_flag;
 
     s->is_nalff        = s0->is_nalff;
     s->nal_length_size = s0->nal_length_size;
@@ -3239,6 +3255,7 @@ static av_cold int hevc_decode_init(AVCodecContext *avctx)
 
     s->enable_parallel_tiles = 0;
     s->picture_struct = 0;
+    s->eos = 1;
 
     if(avctx->active_thread_type & FF_THREAD_SLICE)
         s->threads_number = avctx->thread_count;
@@ -3280,6 +3297,7 @@ static void hevc_decode_flush(AVCodecContext *avctx)
     HEVCContext *s = avctx->priv_data;
     ff_hevc_flush_dpb(s);
     s->max_ra = INT_MAX;
+    s->eos = 1;
 }
 
 #define OFFSET(x) offsetof(HEVCContext, x)
