@@ -11,7 +11,7 @@ PREFIX=`pwd`/../
 ./configure \
     --prefix="$PREFIX" \
     --extra-cflags="-I../include $OPENCV_INCLUDES $OPENSSL_INCLUDES -I/home/blahgeek/nvidia_video_sdk_6.0.1/Samples/common/inc/ -I/opt/BlackmagicDeckLinkSDK/Linux/include" \
-    --extra-libs="../lib/libmap.a ../lib/libDL.a $OPENCV_LIBS $OPENSSL_LIBS" \
+    --extra-libs="../lib/libDL.a $OPENCV_LIBS $OPENSSL_LIBS" \
     --enable-gpl \
     --enable-libx264 \
     --enable-nonfree \
