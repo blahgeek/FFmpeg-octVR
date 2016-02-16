@@ -26,9 +26,9 @@ extern "C" {
 #include <fstream>
 #include <iostream>
 #include <algorithm>
-#include "libmap.hpp"
 
 #include "opencv2/core/cuda.hpp"
+#include "octvr.hpp"
 
 typedef struct {
     const AVClass *avclass;
