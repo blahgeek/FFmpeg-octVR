@@ -40,7 +40,8 @@
 #include <libv4l2.h>
 #endif
 
-static const int desired_video_buffers = 256;
+//static const int desired_video_buffers = 256;
+static const int desired_video_buffers = 2;
 
 #define V4L_ALLFORMATS  3
 #define V4L_RAWFORMATS  1

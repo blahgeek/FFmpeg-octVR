@@ -32,6 +32,7 @@
 #include "libavutil/avstring.h"
 #include "libavutil/opt.h"
 #include "libavutil/log.h"
+#include "libavutil/time_internal.h"
 
 #include "avformat.h"
 #include "internal.h"
@@ -79,6 +80,7 @@ typedef struct HLSContext {
     uint32_t flags;        // enum HLSFlags
     char *segment_filename;
 
+    int use_localtime;      ///< flag to expand filename with localtime
     int allowcache;
     int64_t recording_time;
     int has_video;
@@ -118,7 +120,8 @@ static int hls_delete_old_segments(HLSContext *hls) {
     HLSSegment *segment, *previous_segment = NULL;
     float playlist_duration = 0.0f;
     int ret = 0, path_size, sub_path_size;
-    char *dirname = NULL, *p, *path, *sub_path;
+    char *dirname = NULL, *p, *sub_path;
+    char *path = NULL;
 
     segment = hls->segments;
     while (segment) {
@@ -160,12 +163,6 @@ static int hls_delete_old_segments(HLSContext *hls) {
             ret = AVERROR(ENOMEM);
             goto fail;
         }
-        sub_path_size = strlen(dirname) + strlen(segment->sub_filename) + 1;
-        sub_path = av_malloc(sub_path_size);
-        if (!sub_path) {
-            ret = AVERROR(ENOMEM);
-            goto fail;
-        }
 
         av_strlcpy(path, dirname, path_size);
         av_strlcat(path, segment->filename, path_size);
@@ -174,20 +171,30 @@ static int hls_delete_old_segments(HLSContext *hls) {
                                      path, strerror(errno));
         }
 
-        av_strlcpy(sub_path, dirname, sub_path_size);
-        av_strlcat(sub_path, segment->sub_filename, sub_path_size);
-        if (unlink(sub_path) < 0) {
-            av_log(hls, AV_LOG_ERROR, "failed to delete old segment %s: %s\n",
-                                     sub_path, strerror(errno));
+        if (segment->sub_filename[0] != '\0') {
+            sub_path_size = strlen(dirname) + strlen(segment->sub_filename) + 1;
+            sub_path = av_malloc(sub_path_size);
+            if (!sub_path) {
+                ret = AVERROR(ENOMEM);
+                goto fail;
+            }
+
+            av_strlcpy(sub_path, dirname, sub_path_size);
+            av_strlcat(sub_path, segment->sub_filename, sub_path_size);
+            if (unlink(sub_path) < 0) {
+                av_log(hls, AV_LOG_ERROR, "failed to delete old segment %s: %s\n",
+                                         sub_path, strerror(errno));
+            }
+            av_free(sub_path);
         }
-        av_free(path);
-        av_free(sub_path);
+        av_freep(&path);
         previous_segment = segment;
         segment = previous_segment->next;
         av_free(previous_segment);
     }
 
 fail:
+    av_free(path);
     av_free(dirname);
 
     return ret;
@@ -251,7 +258,7 @@ static int hls_mux_init(AVFormatContext *s)
 {
     HLSContext *hls = s->priv_data;
     AVFormatContext *oc;
-    AVFormatContext *vtt_oc;
+    AVFormatContext *vtt_oc = NULL;
     int i, ret;
 
     ret = avformat_alloc_output_context2(&hls->avf, hls->oformat, NULL, NULL);
@@ -306,6 +313,8 @@ static int hls_append_segment(HLSContext *hls, double duration, int64_t pos,
 
     if(hls->has_subtitle)
         av_strlcpy(en->sub_filename, av_basename(hls->vtt_avf->filename), sizeof(en->sub_filename));
+    else
+        en->sub_filename[0] = '\0';
 
     en->duration = duration;
     en->pos      = pos;
@@ -479,9 +488,18 @@ static int hls_start(AVFormatContext *s)
             av_strlcpy(vtt_oc->filename, c->vtt_basename,
                   sizeof(vtt_oc->filename));
     } else {
-        if (av_get_frame_filename(oc->filename, sizeof(oc->filename),
+        if (c->use_localtime) {
+            time_t now0;
+            struct tm *tm, tmpbuf;
+            time(&now0);
+            tm = localtime_r(&now0, &tmpbuf);
+            if (!strftime(oc->filename, sizeof(oc->filename), c->basename, tm)) {
+                av_log(oc, AV_LOG_ERROR, "Could not get segment filename with use_localtime\n");
+                return AVERROR(EINVAL);
+            }
+       } else if (av_get_frame_filename(oc->filename, sizeof(oc->filename),
                                   c->basename, c->wrap ? c->sequence % c->wrap : c->sequence) < 0) {
-            av_log(oc, AV_LOG_ERROR, "Invalid segment filename template '%s'\n", c->basename);
+            av_log(oc, AV_LOG_ERROR, "Invalid segment filename template '%s' you can try use -use_localtime 1 with it\n", c->basename);
             return AVERROR(EINVAL);
         }
         if( c->vtt_basename) {
@@ -530,8 +548,11 @@ static int hls_start(AVFormatContext *s)
     if (oc->oformat->priv_class && oc->priv_data)
         av_opt_set(oc->priv_data, "mpegts_flags", "resend_headers", 0);
 
-    if (c->vtt_basename)
-        avformat_write_header(vtt_oc,NULL);
+    if (c->vtt_basename) {
+        err = avformat_write_header(vtt_oc,NULL);
+        if (err < 0)
+            return err;
+    }
 
     return 0;
 }
@@ -542,6 +563,7 @@ static int hls_write_header(AVFormatContext *s)
     int ret, i;
     char *p;
     const char *pattern = "%d.ts";
+    const char *pattern_localtime_fmt = "-%s.ts";
     const char *vtt_pattern = "%d.vtt";
     AVDictionary *options = NULL;
     int basename_size;
@@ -596,7 +618,11 @@ static int hls_write_header(AVFormatContext *s)
         if (hls->flags & HLS_SINGLE_FILE)
             pattern = ".ts";
 
-        basename_size = strlen(s->filename) + strlen(pattern) + 1;
+        if (hls->use_localtime) {
+            basename_size = strlen(s->filename) + strlen(pattern_localtime_fmt) + 1;
+        } else {
+            basename_size = strlen(s->filename) + strlen(pattern) + 1;
+        }
         hls->basename = av_malloc(basename_size);
         if (!hls->basename) {
             ret = AVERROR(ENOMEM);
@@ -608,7 +634,11 @@ static int hls_write_header(AVFormatContext *s)
         p = strrchr(hls->basename, '.');
         if (p)
             *p = '\0';
-        av_strlcat(hls->basename, pattern, basename_size);
+        if (hls->use_localtime) {
+            av_strlcat(hls->basename, pattern_localtime_fmt, basename_size);
+        } else {
+            av_strlcat(hls->basename, pattern, basename_size);
+        }
     }
 
     if(hls->has_subtitle) {
@@ -817,6 +847,7 @@ static const AVOption options[] = {
     {"round_durations", "round durations in m3u8 to whole numbers", 0, AV_OPT_TYPE_CONST, {.i64 = HLS_ROUND_DURATIONS }, 0, UINT_MAX,   E, "flags"},
     {"discont_start", "start the playlist with a discontinuity tag", 0, AV_OPT_TYPE_CONST, {.i64 = HLS_DISCONT_START }, 0, UINT_MAX,   E, "flags"},
     {"omit_endlist", "Do not append an endlist when ending stream", 0, AV_OPT_TYPE_CONST, {.i64 = HLS_OMIT_ENDLIST }, 0, UINT_MAX,   E, "flags"},
+    { "use_localtime",          "set filename expansion with strftime at segment creation", OFFSET(use_localtime), AV_OPT_TYPE_INT, {.i64 = 0 }, 0, 1, E },
 
     { NULL },
 };

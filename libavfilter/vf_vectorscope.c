@@ -40,9 +40,11 @@ typedef struct VectorscopeContext {
     const AVClass *class;
     int mode;
     int intensity;
+    float fintensity;
     const uint8_t *bg_color;
     int planewidth[4];
     int planeheight[4];
+    int hsub, vsub;
     int x, y, pd;
     int is_yuv;
     int envelope;
@@ -62,8 +64,8 @@ static const AVOption vectorscope_options[] = {
     {   "color4", 0, 0, AV_OPT_TYPE_CONST, {.i64=COLOR4}, 0, 0, FLAGS, "mode" },
     { "x", "set color component on X axis", OFFSET(x), AV_OPT_TYPE_INT, {.i64=1}, 0, 2, FLAGS},
     { "y", "set color component on Y axis", OFFSET(y), AV_OPT_TYPE_INT, {.i64=2}, 0, 2, FLAGS},
-    { "intensity", "set intensity", OFFSET(intensity), AV_OPT_TYPE_INT, {.i64=1}, 1, 255, FLAGS},
-    { "i",         "set intensity", OFFSET(intensity), AV_OPT_TYPE_INT, {.i64=1}, 1, 255, FLAGS},
+    { "intensity", "set intensity", OFFSET(fintensity), AV_OPT_TYPE_FLOAT, {.dbl=0.004}, 0, 1, FLAGS},
+    { "i",         "set intensity", OFFSET(fintensity), AV_OPT_TYPE_FLOAT, {.dbl=0.004}, 0, 1, FLAGS},
     { "envelope",  "set envelope", OFFSET(envelope), AV_OPT_TYPE_INT, {.i64=0}, 0, 3, FLAGS, "envelope"},
     { "e",         "set envelope", OFFSET(envelope), AV_OPT_TYPE_INT, {.i64=0}, 0, 3, FLAGS, "envelope"},
     {   "none",         0, 0, AV_OPT_TYPE_CONST, {.i64=0}, 0, 0, FLAGS, "envelope" },
@@ -117,8 +119,7 @@ static int query_formats(AVFilterContext *ctx)
     if (!ctx->inputs[0]->out_formats) {
         const enum AVPixelFormat *in_pix_fmts;
 
-        if (((s->x == 1 && s->y == 2) || (s->x == 2 && s->y == 1)) &&
-            (s->mode != COLOR4))
+        if ((s->x == 1 && s->y == 2) || (s->x == 2 && s->y == 1))
             in_pix_fmts = in2_pix_fmts;
         else
             in_pix_fmts = in1_pix_fmts;
@@ -173,6 +174,8 @@ static int config_input(AVFilterLink *inlink)
         s->bg_color = black_yuva_color;
     }
 
+    s->hsub = desc->log2_chroma_w;
+    s->vsub = desc->log2_chroma_h;
     s->planeheight[1] = s->planeheight[2] = FF_CEIL_RSHIFT(inlink->h, desc->log2_chroma_h);
     s->planeheight[0] = s->planeheight[3] = inlink->h;
     s->planewidth[1]  = s->planewidth[2]  = FF_CEIL_RSHIFT(inlink->w, desc->log2_chroma_w);
@@ -184,8 +187,10 @@ static int config_input(AVFilterLink *inlink)
 static int config_output(AVFilterLink *outlink)
 {
     const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(outlink->format);
-    int depth = desc->comp[0].depth_minus1 + 1;
+    const int depth = desc->comp[0].depth_minus1 + 1;
+    VectorscopeContext *s = outlink->src->priv;
 
+    s->intensity = s->fintensity * ((1 << depth) - 1);
     outlink->h = outlink->w = 1 << depth;
     outlink->sample_aspect_ratio = (AVRational){1,1};
     return 0;
@@ -199,9 +204,9 @@ static void envelope_instant(VectorscopeContext *s, AVFrame *out)
 
     for (i = 0; i < out->height; i++) {
         for (j = 0; j < out->width; j++) {
-            int pos = i * dlinesize + j;
-            int poa = (i - 1) * dlinesize + j;
-            int pob = (i + 1) * dlinesize + j;
+            const int pos = i * dlinesize + j;
+            const int poa = (i - 1) * dlinesize + j;
+            const int pob = (i + 1) * dlinesize + j;
 
             if (dpd[pos] && (((!j || !dpd[pos - 1]) || ((j == (out->width - 1)) || !dpd[pos + 1]))
                          || ((!i || !dpd[poa]) || ((i == (out->height - 1)) || !dpd[pob])))) {
@@ -219,7 +224,7 @@ static void envelope_peak(VectorscopeContext *s, AVFrame *out)
 
     for (i = 0; i < out->height; i++) {
         for (j = 0; j < out->width; j++) {
-            int pos = i * dlinesize + j;
+            const int pos = i * dlinesize + j;
 
             if (dpd[pos])
                 s->peak[i][j] = 255;
@@ -231,7 +236,7 @@ static void envelope_peak(VectorscopeContext *s, AVFrame *out)
 
     for (i = 0; i < out->height; i++) {
         for (j = 0; j < out->width; j++) {
-            int pos = i * dlinesize + j;
+            const int pos = i * dlinesize + j;
 
             if (s->peak[i][j] && (((!j || !s->peak[i][j-1]) || ((j == (out->width - 1)) || !s->peak[i][j + 1]))
                               || ((!i || !s->peak[i-1][j]) || ((i == (out->height - 1)) || !s->peak[i + 1][j])))) {
@@ -260,16 +265,19 @@ static void vectorscope(VectorscopeContext *s, AVFrame *in, AVFrame *out, int pd
     const int slinesized = in->linesize[pd];
     const int dlinesize = out->linesize[0];
     const int intensity = s->intensity;
-    int i, j, px = s->x, py = s->y;
+    const int px = s->x, py = s->y;
     const int h = s->planeheight[py];
     const int w = s->planewidth[px];
     const uint8_t *spx = src[px];
     const uint8_t *spy = src[py];
     const uint8_t *spd = src[pd];
+    const int hsub = s->hsub;
+    const int vsub = s->vsub;
     uint8_t **dst = out->data;
     uint8_t *dpx = dst[px];
     uint8_t *dpy = dst[py];
     uint8_t *dpd = dst[pd];
+    int i, j;
 
     switch (s->mode) {
     case COLOR:
@@ -361,13 +369,13 @@ static void vectorscope(VectorscopeContext *s, AVFrame *in, AVFrame *out, int pd
         }
         break;
     case COLOR4:
-        for (i = 0; i < h; i++) {
-            const int iwx = i * slinesizex;
-            const int iwy = i * slinesizey;
+        for (i = 0; i < in->height; i++) {
+            const int iwx = (i >> vsub) * slinesizex;
+            const int iwy = (i >> vsub) * slinesizey;
             const int iwd = i * slinesized;
-            for (j = 0; j < w; j++) {
-                const int x = spx[iwx + j];
-                const int y = spy[iwy + j];
+            for (j = 0; j < in->width; j++) {
+                const int x = spx[iwx + (j >> hsub)];
+                const int y = spy[iwy + (j >> hsub)];
                 const int pos = y * dlinesize + x;
 
                 dpd[pos] = FFMAX(spd[iwd + j], dpd[pos]);

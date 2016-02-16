@@ -2,7 +2,7 @@
 * @Author: BlahGeek
 * @Date:   2015-09-01
 * @Last Modified by:   BlahGeek
-* @Last Modified time: 2015-11-13
+* @Last Modified time: 2015-12-07
 */
 
 #include <stdio.h>
@@ -28,19 +28,24 @@ extern "C" {
 #include <algorithm>
 #include "libmap.hpp"
 
+#include "opencv2/core/cuda.hpp"
+
 typedef struct {
     const AVClass *avclass;
 
     int nb_inputs;
-    char * options_file;
-    vr::json options;
-    char * data_file;
+    char * output_templates;
+    int blend;
 
-    char * save_data_file;
-    bool save_data_file_done;
+    int crop_x, crop_w;
 
-    int out_width, out_height;
-    vr::MultiMapper * remapper;
+    int nb_outputs;
+    vr::MapperTemplate ** mapper_templates;
+
+    vr::AsyncMultiMapper * async_remapper;
+
+    cv::Size * in_sizes;
+    AVFrame ** last_frames;
 
     struct FFBufQueue *queues;
 } VRMapContext;
@@ -48,8 +53,20 @@ typedef struct {
 static int query_formats(AVFilterContext *ctx)
 {
     AVFilterFormats *formats = NULL;
-    ff_add_format(&formats, AV_PIX_FMT_BGR24); // for OpenCV
-    return ff_set_common_formats(ctx, formats);
+    ff_add_format(&formats, AV_PIX_FMT_RGB24); // for OpenCV
+    for(int i = 0 ; i < ctx->nb_inputs; i += 1) {
+        if(ctx->inputs[i] && !ctx->inputs[i]->out_formats)
+            ff_formats_ref(formats, &ctx->inputs[i]->out_formats);
+    }
+
+    AVFilterFormats *oformats = NULL;
+    ff_add_format(&oformats, AV_PIX_FMT_RGB24);
+    for(int i = 0 ; i < ctx->nb_outputs ; i += 1) {
+        if(ctx->outputs[i] && !ctx->outputs[i]->in_formats)
+            ff_formats_ref(oformats, &ctx->outputs[i]->in_formats);
+    }
+
+    return 0;
 }
 
 static int push_frame(AVFilterContext * ctx) {
@@ -62,57 +79,68 @@ static int push_frame(AVFilterContext * ctx) {
                     [](struct FFBufQueue &q){ return q.available; }))
         return 0;
 
-    if(!s->save_data_file_done && s->save_data_file) {
-        av_log(ctx, AV_LOG_INFO, "Saving data file to %s\n", s->save_data_file);
-        std::ofstream data_file(s->save_data_file);
-        s->remapper->dump(data_file);
-        s->save_data_file_done = true;
-    }
-
     vr::Timer timer("FFMpeg Filter");
 
     std::vector<AVFrame *> frames(s->nb_inputs);
+    std::vector<cv::Mat> in_mats;
     for(int i = 0 ; i < s->nb_inputs ; i += 1) {
         frames[i] = ff_bufqueue_get(&s->queues[i]);
         av_assert0(frames[i] != nullptr);
+
+        auto & f = frames[i];
+        int real_w = s->crop_w != 0 ? s->crop_w : f->width;
+        in_mats.emplace_back(f->height, real_w,
+                             CV_8UC3, 
+                             f->data[0] + s->crop_x * 3, 
+                             f->linesize[0]);
     }
 
-    timer.tick("Get frames from buffer");
+    timer.tick("Prepare inputs");
 
-    av_log(ctx, AV_LOG_WARNING, "out: %dx%d\n", s->out_width, s->out_height);
-    AVFrame * out = ff_get_video_buffer(ctx->outputs[0], s->out_width, s->out_height);
-    if(!out) return AVERROR(ENOMEM);
-    av_frame_copy_props(out, frames[0]);
+    std::vector<AVFrame *> out_frames(s->nb_outputs);
+    std::vector<cv::Mat> out_mats;
+    for(int i = 0 ; i < s->nb_outputs ; i += 1) {
+        int out_width = s->mapper_templates[i]->out_size.width;
+        int out_height = s->mapper_templates[i]->out_size.height;
+        av_log(ctx, AV_LOG_INFO, "Output #%d: %dx%d\n", i, out_width, out_height);
+        out_frames[i] = ff_get_video_buffer(ctx->outputs[i], out_width, out_height);
+        av_frame_copy_props(out_frames[i], frames[0]);
 
-    av_assert0(out->data[0] != nullptr);
-    av_assert0(out->data[1] == nullptr);
-    cv::Mat out_mat(s->out_height, s->out_width, CV_8UC3, out->data[0], out->linesize[0]);
+        out_mats.emplace_back(out_height, out_width, CV_8UC3,
+                              out_frames[i]->data[0], out_frames[i]->linesize[0]);
+    }
+    timer.tick("Prepare outputs");
+    
+    s->async_remapper->push(in_mats, out_mats);
 
-    std::vector<cv::Mat> in_mats;
-    for(auto & f: frames)
-        in_mats.emplace_back(f->height, f->width, CV_8UC3, f->data[0], f->linesize[0]);
-
-    timer.tick("Constructing matrics");
-
-    if(s->nb_inputs > 1) {
-        cv::UMat out_mat_u = out_mat.getUMat(cv::ACCESS_WRITE);
-        std::vector<cv::UMat> in_mats_u;
-        for(auto & m: in_mats)
-            in_mats_u.push_back(m.getUMat(cv::ACCESS_READ));
-        timer.tick("Constructing UMats");
-        s->remapper->get_output(in_mats_u, out_mat_u);
-        timer.tick("Get output");
+    AVFrame ** real_out_frames = new AVFrame * [s->nb_outputs];
+    if(s->last_frames == NULL) {
+        for(int i = 0 ; i < s->nb_outputs ; i += 1)
+            real_out_frames[i] = NULL;
+            //real_out_frames[i] = ff_get_video_buffer(ctx->outputs[i],
+                                                     //s->mapper_templates[i]->out_size.width,
+                                                     //s->mapper_templates[i]->out_size.height);
+        s->last_frames = new AVFrame *[s->nb_inputs + s->nb_outputs];
     } else {
-        cv::UMat out_mat_u = out_mat.getUMat(cv::ACCESS_WRITE);
-        cv::UMat in_mat_u = in_mats.front().getUMat(cv::ACCESS_READ);
-        timer.tick("Constructing UMats");
-        s->remapper->get_single_output(in_mat_u, out_mat_u);
-        timer.tick("Get single output");
+        s->async_remapper->pop();
+        for(int i = 0 ; i < s->nb_outputs ; i += 1)
+            real_out_frames[i] = s->last_frames[s->nb_inputs + i];
+        for(int i = 0 ; i < s->nb_inputs ; i += 1)
+            av_frame_free(&s->last_frames[i]);
     }
 
-    for(auto f: frames)
-        av_frame_free(&f);
-    return ff_filter_frame(ctx->outputs[0], out);
+    for(int i = 0 ; i < s->nb_inputs ; i += 1)
+        s->last_frames[i] = frames[i];
+    for(int i = 0 ; i < s->nb_outputs ; i += 1)
+        s->last_frames[s->nb_inputs + i] = out_frames[i];
+
+    for(int i = 0 ; i < s->nb_outputs ; i += 1)
+        if(real_out_frames[i])
+            ff_filter_frame(ctx->outputs[i], real_out_frames[i]);
+
+    delete [] real_out_frames;
+
+    return 0;
 }
 
 static int filter_frame(AVFilterLink *inlink, AVFrame * frame) {
@@ -132,79 +160,28 @@ static int config_input(AVFilterLink *inlink) {
     unsigned in_no = FF_INLINK_IDX(inlink);
     av_log(ctx, AV_LOG_DEBUG, "config_input: input %d size: %dx%d\n",
            in_no, inlink->w, inlink->h);
+    if(s->crop_w != 0)
+        av_log(ctx, AV_LOG_WARNING, "Using width %d for input %d\n", s->crop_w, in_no);
+    s->in_sizes[in_no] = cv::Size(s->crop_w != 0 ? s->crop_w : inlink->w, inlink->h);
 
-    if(s->options_file) {
-        s->remapper->add_input(s->options["inputs"][in_no]["type"],
-                               s->options["inputs"][in_no]["options"],
-                               inlink->w, inlink->h);
-    } else {
-        cv::Size predefined_size = s->remapper->get_input_size(in_no);
-        av_log(ctx, AV_LOG_DEBUG, "Predefined input size#%d: %dx%d\n",
-               predefined_size.width, predefined_size.height);
-        if(predefined_size != cv::Size(inlink->w, inlink->h))
-            return -1;
+    if(in_no == s->nb_inputs - 1) {
+        std::vector<vr::MapperTemplate> _templates;
+        for(int i = 0 ; i < s->nb_outputs ; i += 1)
+            _templates.push_back(*s->mapper_templates[i]);
+        std::vector<cv::Size> _sizes(s->in_sizes, s->in_sizes + s->nb_inputs);
+        s->async_remapper = vr::AsyncMultiMapper::New(_templates, _sizes, s->blend);
+        av_log(ctx, AV_LOG_INFO, "Init async remapper done\n");
     }
-    return 0;
-}
-
-static int init(AVFilterContext *ctx) {
-    VRMapContext *s = static_cast<VRMapContext *>(ctx->priv);
-    s->queues = static_cast<struct FFBufQueue *>(av_calloc(s->nb_inputs, sizeof(s->queues[0])));
-    if(!s->queues)
-        return AVERROR(ENOMEM);
-
-    for(int i = 0 ; i < s->nb_inputs ; i += 1) {
-        AVFilterPad inpad = { 0 };
-        inpad.name = av_asprintf("input%d", i);
-        inpad.type = AVMEDIA_TYPE_VIDEO;
-        inpad.filter_frame = filter_frame;
-        inpad.config_props = config_input;
-        ff_insert_inpad(ctx, i, &inpad);
-    }
-
-    av_assert0(s->remapper == nullptr);
-    av_assert0((s->options_file == NULL) ^ (s->data_file == NULL) == true);
-
-    if(s->data_file) {
-        av_assert0(s->out_width == 0 && s->out_height == 0);
-        std::ifstream f(s->data_file);
-        s->remapper = vr::MultiMapper::New(f);
-    } else {
-        std::ifstream f(s->options_file);
-        s->options << f;
-        s->remapper = vr::MultiMapper::New(s->options["output"]["type"],
-                                           s->options["output"]["options"],
-                                           s->out_width, s->out_height);
-    }
-
-    auto final_size = s->remapper->get_output_size();
-    s->out_width = final_size.width;
-    s->out_height = final_size.height;
-
-    av_log(ctx, AV_LOG_DEBUG, "init: final size: %dx%d\n",
-           s->out_width, s->out_height);
 
     return 0;
-}
-
-static void uninit(AVFilterContext *ctx) {
-    VRMapContext *s = static_cast<VRMapContext *>(ctx->priv);
-    for(int i = 0 ; i < s->nb_inputs ; i += 1) {
-        ff_bufqueue_discard_all(&s->queues[i]);
-        av_freep(&s->queues[i]);
-        av_freep(&ctx->input_pads[i].name);
-    }
-    if(s->remapper) {
-        delete s->remapper;
-        s->remapper = NULL;
-    }
 }
 
 static int config_output(AVFilterLink *link)
 {
     VRMapContext *s = static_cast<VRMapContext *>(link->src->priv);
-    link->w = s->out_width;
-    link->h = s->out_height;
+    unsigned out_no = FF_OUTLINK_IDX(link);
+    link->w = s->mapper_templates[out_no]->out_size.width;
+    link->h = s->mapper_templates[out_no]->out_size.height;
     return 0;
 }
 
@@ -223,16 +200,85 @@ static int request_frame(AVFilterLink *outlink) {
     return push_frame(ctx);
 }
 
+static int init(AVFilterContext *ctx) {
+    VRMapContext *s = static_cast<VRMapContext *>(ctx->priv);
+    s->queues = static_cast<struct FFBufQueue *>(av_calloc(s->nb_inputs, sizeof(s->queues[0])));
+    if(!s->queues)
+        return AVERROR(ENOMEM);
+
+    for(int i = 0 ; i < s->nb_inputs ; i += 1) {
+        AVFilterPad inpad = { 0 };
+        inpad.name = av_strdup(av_asprintf("input%d", i));
+        inpad.type = AVMEDIA_TYPE_VIDEO;
+        inpad.filter_frame = filter_frame;
+        inpad.config_props = config_input;
+        ff_insert_inpad(ctx, i, &inpad);
+    }
+    s->in_sizes = new cv::Size [s->nb_inputs];
+
+    av_assert0(s->output_templates != NULL);
+    std::string output_strings(s->output_templates);
+    std::vector<int> output_strings_seq_pos;
+    for(int i = 0 ; i < output_strings.size() ; i += 1) {
+        if(output_strings[i] == '|')
+            output_strings_seq_pos.push_back(i);
+    }
+    output_strings_seq_pos.push_back(output_strings.size());
+
+    s->nb_outputs = output_strings_seq_pos.size();
+    s->mapper_templates = new vr::MapperTemplate * [s->nb_outputs];
+    for(int i = 0 ; i < output_strings_seq_pos.size() ; i += 1) {
+        int start = i == 0 ? 0 : (output_strings_seq_pos[i-1] + 1);
+        int stop = output_strings_seq_pos[i];
+        std::string filename = output_strings.substr(start, stop-start);
+        av_log(ctx, AV_LOG_INFO, "Loading template %s\n", filename.c_str());
+        std::ifstream f(filename.c_str());
+        s->mapper_templates[i] = new vr::MapperTemplate(f);
+        av_log(ctx, AV_LOG_INFO, "Load complete, size: %dx%d\n",
+               s->mapper_templates[i]->out_size.width,
+               s->mapper_templates[i]->out_size.height);
+    }
+
+    for(int i = 0 ; i < s->nb_outputs ; i += 1) {
+        AVFilterPad outpad = { 0 };
+        outpad.name = av_strdup(av_asprintf("output%d", i));
+        outpad.type = AVMEDIA_TYPE_VIDEO;
+        outpad.request_frame = request_frame;
+        outpad.config_props = config_output;
+        ff_insert_outpad(ctx, i, &outpad);
+    }
+
+    return 0;
+}
+
+static void uninit(AVFilterContext *ctx) {
+    av_log(ctx, AV_LOG_INFO, "uniniting...\n");
+
+    VRMapContext *s = static_cast<VRMapContext *>(ctx->priv);
+    for(int i = 0 ; i < s->nb_inputs ; i += 1) {
+        ff_bufqueue_discard_all(&s->queues[i]);
+        av_freep(&s->queues[i]);
+        av_freep(&ctx->input_pads[i].name);
+    }
+    for(int i = 0 ; i < s->nb_outputs ; i += 1) {
+        delete s->mapper_templates[i];
+        s->mapper_templates[i] = NULL;
+    }
+    if(s->async_remapper) {
+        delete s->async_remapper;
+        s->async_remapper = NULL;
+    }
+}
+
 #define OFFSET(x) offsetof(VRMapContext, x)
 #define FLAGS (AV_OPT_FLAG_FILTERING_PARAM | AV_OPT_FLAG_VIDEO_PARAM)
 
 static const AVOption vr_map_options[] = {
     { "inputs", "Number of input streams", OFFSET(nb_inputs), AV_OPT_TYPE_INT, {.i64 = 2}, 1, INT_MAX, FLAGS},
-    { "options", "Options (json file)", OFFSET(options_file), AV_OPT_TYPE_STRING, {.str = NULL}, CHAR_MIN, CHAR_MAX, FLAGS},
-    { "data", "Dumped data file", OFFSET(data_file), AV_OPT_TYPE_STRING, {.str = NULL}, CHAR_MIN, CHAR_MAX, FLAGS},
-    { "save_data", "Dump to data file", OFFSET(save_data_file), AV_OPT_TYPE_STRING, {.str = NULL}, CHAR_MIN, CHAR_MAX, FLAGS},
-    { "out_width", "Output width", OFFSET(out_width), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS},
-    { "out_height", "Output height", OFFSET(out_height), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS},
+    { "outputs", "comma-seperated output templates", OFFSET(output_templates), AV_OPT_TYPE_STRING, {.str = NULL}, CHAR_MIN, CHAR_MAX, FLAGS},
+    { "crop_x", "Crop X", OFFSET(crop_x), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS},
+    { "crop_w", "Crop width", OFFSET(crop_w), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS},
+    { "blend", "Blending param", OFFSET(blend), AV_OPT_TYPE_INT, {.i64 = 128}, INT_MIN, INT_MAX, FLAGS},
     { NULL }
 };
 
@@ -262,38 +308,13 @@ static const AVClass vr_map_class = {
     NULL, // query_ranges
 };
 
-// g++傻逼
-static const AVFilterPad avfilter_vf_vr_map_output_ = {
-    "default", // name
-    AVMEDIA_TYPE_VIDEO, //type
-    0, 0, // deprecated
-    NULL, // start_frame
-    NULL, // get_video_buffer
-    NULL, // get_audio_buffer
-    NULL, // end_frame
-    NULL, // draw_slice
-    NULL, // filter_frame
-    NULL, // poll_frame
-    request_frame, // request_frame
-    config_output, // config_props
-    0, // needs_fifo,
-    0 // needs_writable
-};
-
-static const AVFilterPad avfilter_vf_vr_map_output_empty = {NULL};
-
-static const AVFilterPad avfilter_vf_vr_map_outputs[] = {
-    avfilter_vf_vr_map_output_,
-    avfilter_vf_vr_map_output_empty,
-};
-
 AVFilter ff_vf_vr_map = {
     "vr_map", // name
     NULL_IF_CONFIG_SMALL("VR Mapping"), // description
     NULL, // inputs
-    avfilter_vf_vr_map_outputs, // outputs
+    NULL, // outputs
     &vr_map_class, // priv_class
-    AVFILTER_FLAG_DYNAMIC_INPUTS, // flags
+    AVFILTER_FLAG_DYNAMIC_INPUTS | AVFILTER_FLAG_DYNAMIC_OUTPUTS, // flags
     init, // init
     NULL, // init_dict
     uninit, // uninit

@@ -385,7 +385,7 @@ static av_cold int initFilter(int16_t **outFilter, int32_t **filterPos,
 
         xDstInSrc = ((dstPos*(int64_t)xInc)>>7) - ((srcPos*0x10000LL)>>7);
         for (i = 0; i < dstW; i++) {
-            int xx = (xDstInSrc - ((int64_t)(filterSize - 2) << 16)) / (1 << 17);
+            int xx = (xDstInSrc - (filterSize - 2) * (1LL<<16)) / (1 << 17);
             int j;
             (*filterPos)[i] = xx;
             for (j = 0; j < filterSize; j++) {
@@ -1418,6 +1418,15 @@ av_cold int sws_init_context(SwsContext *c, SwsFilter *srcFilter,
         c2->inv_gamma = alloc_gamma_tbl(1.f/c->gamma_value);
         if (!c2->gamma || !c2->inv_gamma)
             return AVERROR(ENOMEM);
+
+        // is_internal_flag is set after creating the context
+        // to properly create the gamma convert FilterDescriptor
+        // we have to re-initialize it
+        ff_free_filters(c2);
+        if (ff_init_filters(c2) < 0) {
+            sws_freeContext(c2);
+            return -1;
+        }
 
         c->cascaded_context[2] = NULL;
         if (dstFormat != tmpFmt) {
