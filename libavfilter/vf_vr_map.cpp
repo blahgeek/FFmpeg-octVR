@@ -53,14 +53,14 @@ typedef struct {
 static int query_formats(AVFilterContext *ctx)
 {
     AVFilterFormats *formats = NULL;
-    ff_add_format(&formats, AV_PIX_FMT_RGB24); // for OpenCV
+    ff_add_format(&formats, AV_PIX_FMT_UYVY422);
     for(int i = 0 ; i < ctx->nb_inputs; i += 1) {
         if(ctx->inputs[i] && !ctx->inputs[i]->out_formats)
             ff_formats_ref(formats, &ctx->inputs[i]->out_formats);
     }
 
     AVFilterFormats *oformats = NULL;
-    ff_add_format(&oformats, AV_PIX_FMT_RGB24);
+    ff_add_format(&oformats, AV_PIX_FMT_UYVY422);
     for(int i = 0 ; i < ctx->nb_outputs ; i += 1) {
         if(ctx->outputs[i] && !ctx->outputs[i]->in_formats)
             ff_formats_ref(oformats, &ctx->outputs[i]->in_formats);
@@ -89,9 +89,11 @@ static int push_frame(AVFilterContext * ctx) {
 
         auto & f = frames[i];
         int real_w = s->crop_w != 0 ? s->crop_w : f->width;
+        av_assert0(real_w % 2 == 0 && s->crop_x % 2 == 0);
+
         in_mats.emplace_back(f->height, real_w,
-                             CV_8UC3, 
-                             f->data[0] + s->crop_x * 3, 
+                             CV_8UC2, 
+                             f->data[0] + s->crop_x * 2, 
                              f->linesize[0]);
     }
 
@@ -106,7 +108,7 @@ static int push_frame(AVFilterContext * ctx) {
         out_frames[i] = ff_get_video_buffer(ctx->outputs[i], out_width, out_height);
         av_frame_copy_props(out_frames[i], frames[0]);
 
-        out_mats.emplace_back(out_height, out_width, CV_8UC3,
+        out_mats.emplace_back(out_height, out_width, CV_8UC2,
                               out_frames[i]->data[0], out_frames[i]->linesize[0]);
     }
     timer.tick("Prepare outputs");
