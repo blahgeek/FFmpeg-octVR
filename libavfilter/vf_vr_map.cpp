@@ -2,7 +2,7 @@
 * @Author: BlahGeek
 * @Date:   2015-09-01
 * @Last Modified by:   BlahGeek
-* @Last Modified time: 2015-12-07
+* @Last Modified time: 2016-02-19
 */
 
 #include <stdio.h>
@@ -233,7 +233,12 @@ static int init(AVFilterContext *ctx) {
         std::string filename = output_strings.substr(start, stop-start);
         av_log(ctx, AV_LOG_INFO, "Loading template %s\n", filename.c_str());
         std::ifstream f(filename.c_str());
-        s->mapper_templates[i] = new vr::MapperTemplate(f);
+        try {
+            s->mapper_templates[i] = new vr::MapperTemplate(f);
+        } catch (std::string & e) {
+            av_log(ctx, AV_LOG_ERROR, "Error loading template: %s\n", e.c_str());
+            return AVERROR_INVALIDDATA;
+        }
         av_log(ctx, AV_LOG_INFO, "Load complete, size: %dx%d\n",
                s->mapper_templates[i]->out_size.width,
                s->mapper_templates[i]->out_size.height);
