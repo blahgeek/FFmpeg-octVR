@@ -72,6 +72,7 @@ static av_always_inline av_const int ff_log2_c(unsigned int v)
     return n;
 }
 #else
+#include <intrin.h>
 static av_always_inline av_const int ff_log2_c(unsigned int v)
 {
     unsigned long n;
