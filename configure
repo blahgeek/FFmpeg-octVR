@@ -4199,11 +4199,13 @@ fi
 
 add_cppflags -D_ISOC99_SOURCE
 add_cxxflags -D__STDC_CONSTANT_MACROS
-if [ "$target_os" != darwin ]; then
-    check_cflags -std=c99
+if [ "$toolchain" != msvc ]; then
+    if [ "$target_os" != darwin ]; then
+        check_cflags -std=c99
+    fi
+    check_cxxflags -std=c++11 -Wno-unknown-warning-option -Wno-reserved-user-defined-literal -Wno-literal-suffix
+    add_ldflags -lstdc++
 fi
-check_cxxflags -std=c++11 -Wno-unknown-warning-option -Wno-reserved-user-defined-literal -Wno-literal-suffix
-add_ldflags -lstdc++
 check_cc -D_FILE_OFFSET_BITS=64 <<EOF && add_cppflags -D_FILE_OFFSET_BITS=64
 #include <stdlib.h>
 EOF
