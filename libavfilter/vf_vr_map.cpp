@@ -2,7 +2,7 @@
 * @Author: BlahGeek
 * @Date:   2015-09-01
 * @Last Modified by:   BlahGeek
-* @Last Modified time: 2016-02-19
+* @Last Modified time: 2016-02-20
 */
 
 #include <stdio.h>
@@ -72,56 +72,56 @@ static int query_formats(AVFilterContext *ctx)
 static int push_frame(AVFilterContext * ctx) {
     VRMapContext *s = static_cast<VRMapContext *>(ctx->priv);
 
-    if(std::any_of(ctx->inputs, ctx->inputs + s->nb_inputs,
-                   [](AVFilterLink *l){ return l->closed; }))
+    bool inputs_eof = std::any_of(ctx->inputs, ctx->inputs + s->nb_inputs,
+                                  [](AVFilterLink *l){ return l->closed; });
+    bool queues_available = std::all_of(s->queues, s->queues + s->nb_inputs,
+                                        [](struct FFBufQueue &q){ return q.available; });
+    bool has_last_frame = s->last_frames != NULL;
+
+    if(!queues_available && inputs_eof && !has_last_frame)
         return AVERROR_EOF;
-    if(!std::all_of(s->queues, s->queues + s->nb_inputs,
-                    [](struct FFBufQueue &q){ return q.available; }))
+    if(!queues_available && !inputs_eof)
         return 0;
 
     vr::Timer timer("FFMpeg Filter");
 
-    std::vector<AVFrame *> frames(s->nb_inputs);
-    std::vector<cv::Mat> in_mats;
-    for(int i = 0 ; i < s->nb_inputs ; i += 1) {
-        frames[i] = ff_bufqueue_get(&s->queues[i]);
-        av_assert0(frames[i] != nullptr);
+    std::vector<AVFrame *> frames(s->nb_inputs, NULL);
+    std::vector<AVFrame *> out_frames(s->nb_outputs, NULL);
+    std::vector<cv::Mat> in_mats, out_mats;
 
-        auto & f = frames[i];
-        int real_w = s->crop_w != 0 ? s->crop_w : f->width;
-        av_assert0(real_w % 2 == 0 && s->crop_x % 2 == 0);
+    if(queues_available) {
+        for(int i = 0 ; i < s->nb_inputs ; i += 1) {
+            frames[i] = ff_bufqueue_get(&s->queues[i]);
+            av_assert0(frames[i] != nullptr);
 
-        in_mats.emplace_back(f->height, real_w,
-                             CV_8UC2, 
-                             f->data[0] + s->crop_x * 2, 
-                             f->linesize[0]);
+            auto & f = frames[i];
+            int real_w = s->crop_w != 0 ? s->crop_w : f->width;
+            av_assert0(real_w % 2 == 0 && s->crop_x % 2 == 0);
+            in_mats.emplace_back(f->height, real_w,
+                                 CV_8UC2, 
+                                 f->data[0] + s->crop_x * 2, 
+                                 f->linesize[0]);
+        }
+        timer.tick("Prepare inputs");
+
+        for(int i = 0 ; i < s->nb_outputs ; i += 1) {
+            int out_width = s->mapper_templates[i]->out_size.width;
+            int out_height = s->mapper_templates[i]->out_size.height;
+            av_log(ctx, AV_LOG_INFO, "Output #%d: %dx%d\n", i, out_width, out_height);
+            out_frames[i] = ff_get_video_buffer(ctx->outputs[i], out_width, out_height);
+            av_frame_copy_props(out_frames[i], frames[0]);
+
+            out_mats.emplace_back(out_height, out_width, CV_8UC2,
+                                  out_frames[i]->data[0], out_frames[i]->linesize[0]);
+        }
+        timer.tick("Prepare outputs");
+        s->async_remapper->push(in_mats, out_mats);
     }
-
-    timer.tick("Prepare inputs");
-
-    std::vector<AVFrame *> out_frames(s->nb_outputs);
-    std::vector<cv::Mat> out_mats;
-    for(int i = 0 ; i < s->nb_outputs ; i += 1) {
-        int out_width = s->mapper_templates[i]->out_size.width;
-        int out_height = s->mapper_templates[i]->out_size.height;
-        av_log(ctx, AV_LOG_INFO, "Output #%d: %dx%d\n", i, out_width, out_height);
-        out_frames[i] = ff_get_video_buffer(ctx->outputs[i], out_width, out_height);
-        av_frame_copy_props(out_frames[i], frames[0]);
-
-        out_mats.emplace_back(out_height, out_width, CV_8UC2,
-                              out_frames[i]->data[0], out_frames[i]->linesize[0]);
-    }
-    timer.tick("Prepare outputs");
-    
-    s->async_remapper->push(in_mats, out_mats);
 
     AVFrame ** real_out_frames = new AVFrame * [s->nb_outputs];
-    if(s->last_frames == NULL) {
+    if(!has_last_frame) {
         for(int i = 0 ; i < s->nb_outputs ; i += 1)
             real_out_frames[i] = NULL;
-            //real_out_frames[i] = ff_get_video_buffer(ctx->outputs[i],
-                                                     //s->mapper_templates[i]->out_size.width,
-                                                     //s->mapper_templates[i]->out_size.height);
         s->last_frames = new AVFrame *[s->nb_inputs + s->nb_outputs];
     } else {
         s->async_remapper->pop();
@@ -129,16 +129,23 @@ static int push_frame(AVFilterContext * ctx) {
             real_out_frames[i] = s->last_frames[s->nb_inputs + i];
         for(int i = 0 ; i < s->nb_inputs ; i += 1)
             av_frame_free(&s->last_frames[i]);
+        timer.tick("Pop last frames");
     }
 
-    for(int i = 0 ; i < s->nb_inputs ; i += 1)
-        s->last_frames[i] = frames[i];
-    for(int i = 0 ; i < s->nb_outputs ; i += 1)
-        s->last_frames[s->nb_inputs + i] = out_frames[i];
+    if(queues_available) {
+        for(int i = 0 ; i < s->nb_inputs ; i += 1)
+            s->last_frames[i] = frames[i];
+        for(int i = 0 ; i < s->nb_outputs ; i += 1)
+            s->last_frames[s->nb_inputs + i] = out_frames[i];
+    } else {
+        delete [] s->last_frames;
+        s->last_frames = NULL;
+    }
 
     for(int i = 0 ; i < s->nb_outputs ; i += 1)
         if(real_out_frames[i])
             ff_filter_frame(ctx->outputs[i], real_out_frames[i]);
+    timer.tick("Do next filter");
 
     delete [] real_out_frames;
 
