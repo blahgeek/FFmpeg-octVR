@@ -294,6 +294,22 @@ static void uninit(AVFilterContext *ctx) {
 #define OFFSET(x) offsetof(VRMapContext, x)
 #define FLAGS (AV_OPT_FLAG_FILTERING_PARAM | AV_OPT_FLAG_VIDEO_PARAM)
 
+#if defined( _MSC_VER )
+/* MSVC++ does not support C99-style union initialization when compiling C++
+ * Dirty Hack: int64_t 4607182418800017408 == double 1.0. PERFECT!
+ */
+static const AVOption vr_map_options[] = {
+    { "inputs", "Number of input streams", OFFSET(nb_inputs), AV_OPT_TYPE_INT, {2}, 1, INT_MAX, FLAGS},
+    { "outputs", "`|`-seperated output templates", OFFSET(output_templates), AV_OPT_TYPE_STRING, {0}, CHAR_MIN, CHAR_MAX, FLAGS},
+    { "crop_x", "Crop X", OFFSET(crop_x), AV_OPT_TYPE_INT, {0}, 0, INT_MAX, FLAGS},
+    { "crop_w", "Crop width", OFFSET(crop_w), AV_OPT_TYPE_INT, {0}, 0, INT_MAX, FLAGS},
+    { "blend", "Blending param", OFFSET(blend), AV_OPT_TYPE_INT, {128}, INT_MIN, INT_MAX, FLAGS},
+    { "scale_ow", "Scale output width", OFFSET(scale_ow), AV_OPT_TYPE_DOUBLE, {4607182418800017408L}, INT_MIN, INT_MAX, FLAGS},
+    { "scale_oh", "Scale output height", OFFSET(scale_oh), AV_OPT_TYPE_DOUBLE, {4607182418800017408L}, INT_MIN, INT_MAX, FLAGS},
+    { "enable_gain_compensator", "Enable gain compensator", OFFSET(enable_gain_compensator), AV_OPT_TYPE_INT, {1}, 0, 1, FLAGS},
+    { NULL }
+};
+#else
 static const AVOption vr_map_options[] = {
     { "inputs", "Number of input streams", OFFSET(nb_inputs), AV_OPT_TYPE_INT, {.i64 = 2}, 1, INT_MAX, FLAGS},
     { "outputs", "`|`-seperated output templates", OFFSET(output_templates), AV_OPT_TYPE_STRING, {.str = NULL}, CHAR_MIN, CHAR_MAX, FLAGS},
@@ -305,6 +321,7 @@ static const AVOption vr_map_options[] = {
     { "enable_gain_compensator", "Enable gain compensator", OFFSET(enable_gain_compensator), AV_OPT_TYPE_INT, {.i64 = 1}, 0, 1, FLAGS},
     { NULL }
 };
+#endif
 
 // g++真心傻逼
 
@@ -332,6 +349,8 @@ static const AVClass vr_map_class = {
     NULL, // query_ranges
 };
 
+extern "C"{
+
 AVFilter ff_vf_vr_map = {
     "vr_map", // name
     NULL_IF_CONFIG_SMALL("VR Mapping"), // description
@@ -348,3 +367,5 @@ AVFilter ff_vf_vr_map = {
     NULL, // process_command
     NULL, // init_opaque
 };
+
+}
