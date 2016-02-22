@@ -2,7 +2,7 @@
 * @Author: BlahGeek
 * @Date:   2015-09-01
 * @Last Modified by:   BlahGeek
-* @Last Modified time: 2016-02-20
+* @Last Modified time: 2016-02-23
 */
 
 #include <stdio.h>
@@ -40,6 +40,7 @@ typedef struct {
 
     int crop_x, crop_w;
     double scale_ow, scale_oh;
+    double preview_scale;
 
     int nb_outputs;
     vr::MapperTemplate ** mapper_templates;
@@ -185,7 +186,10 @@ static int config_input(AVFilterLink *inlink) {
         }
         std::vector<cv::Size> _sizes(s->in_sizes, s->in_sizes + s->nb_inputs);
         s->async_remapper = vr::AsyncMultiMapper::New(_templates, _sizes, 
-                                                      s->blend, s->enable_gain_compensator, _scale_outputs);
+                                                      s->blend, s->enable_gain_compensator, 
+                                                      _scale_outputs,
+                                                      cv::Size(s->mapper_templates[0]->out_size.width * s->preview_scale, 
+                                                               s->mapper_templates[0]->out_size.height * s->preview_scale));
         av_log(ctx, AV_LOG_INFO, "Init async remapper done\n");
     }
 
@@ -302,6 +306,7 @@ static const AVOption vr_map_options[] = {
     { "blend", "Blending param", OFFSET(blend), AV_OPT_TYPE_INT, {.i64 = 128}, INT_MIN, INT_MAX, FLAGS},
     { "scale_ow", "Scale output width", OFFSET(scale_ow), AV_OPT_TYPE_DOUBLE, {.dbl = 1.0}, INT_MIN, INT_MAX, FLAGS},
     { "scale_oh", "Scale output height", OFFSET(scale_oh), AV_OPT_TYPE_DOUBLE, {.dbl = 1.0}, INT_MIN, INT_MAX, FLAGS},
+    { "preview", "Preview scale (for QT only)", OFFSET(preview_scale), AV_OPT_TYPE_DOUBLE, {.dbl = 0}, INT_MIN, INT_MAX, FLAGS},
     { "enable_gain_compensator", "Enable gain compensator", OFFSET(enable_gain_compensator), AV_OPT_TYPE_INT, {.i64 = 1}, 0, 1, FLAGS},
     { NULL }
 };
