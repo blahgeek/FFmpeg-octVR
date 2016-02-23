@@ -39,7 +39,7 @@ typedef struct {
     int enable_gain_compensator;
 
     int crop_x, crop_w;
-    double scale_ow, scale_oh;
+    int scale_ow, scale_oh;
     int preview_ow, preview_oh;
 
     int nb_outputs;
@@ -108,9 +108,11 @@ static int push_frame(AVFilterContext * ctx) {
         timer.tick("Prepare inputs");
 
         for(int i = 0 ; i < s->nb_outputs ; i += 1) {
-            int out_width = s->mapper_templates[i]->out_size.width * s->scale_ow;
-            int out_height = s->mapper_templates[i]->out_size.height * s->scale_oh;
-            av_log(ctx, AV_LOG_INFO, "Output #%d: %dx%d (scaled by %.3fx%.3f)\n", i, out_width, out_height, s->scale_ow, s->scale_oh);
+            int out_width = (s->scale_ow == 0) ? s->mapper_templates[i]->out_size.width : s->scale_ow;
+            int out_height = (s->scale_oh == 0) ? s->mapper_templates[i]->out_size.height : s->scale_oh;
+            av_log(ctx, AV_LOG_INFO, "Output #%d: %dx%d (scaled from %dx%d)\n", i, 
+                   out_width, out_height, 
+                   s->mapper_templates[i]->out_size.width, s->mapper_templates[i]->out_size.height);
             out_frames[i] = ff_get_video_buffer(ctx->outputs[i], out_width, out_height);
             av_frame_copy_props(out_frames[i], frames[0]);
 
@@ -181,8 +183,10 @@ static int config_input(AVFilterLink *inlink) {
         std::vector<cv::Size> _scale_outputs;
         for(int i = 0 ; i < s->nb_outputs ; i += 1) {
             _templates.push_back(*s->mapper_templates[i]);
-            _scale_outputs.push_back(cv::Size(s->mapper_templates[i]->out_size.width * s->scale_ow, 
-                                              s->mapper_templates[i]->out_size.height * s->scale_oh));
+            cv::Size out_size = cv::Size(s->scale_ow, s->scale_oh);
+            if(out_size.area() == 0)
+                out_size = s->mapper_templates[i]->out_size;
+            _scale_outputs.push_back(out_size);
         }
         std::vector<cv::Size> _sizes(s->in_sizes, s->in_sizes + s->nb_inputs);
         s->async_remapper = vr::AsyncMultiMapper::New(_templates, _sizes, 
@@ -199,8 +203,13 @@ static int config_output(AVFilterLink *link)
 {
     VRMapContext *s = static_cast<VRMapContext *>(link->src->priv);
     unsigned out_no = FF_OUTLINK_IDX(link);
-    link->w = s->mapper_templates[out_no]->out_size.width * s->scale_ow;
-    link->h = s->mapper_templates[out_no]->out_size.height * s->scale_oh;
+
+    cv::Size out_size = cv::Size(s->scale_ow, s->scale_oh);
+    if(out_size.area() == 0)
+        out_size = s->mapper_templates[out_no]->out_size;
+
+    link->w = out_size.width;
+    link->h = out_size.height;
     return 0;
 }
 
@@ -303,8 +312,8 @@ static const AVOption vr_map_options[] = {
     { "crop_x", "Crop X", OFFSET(crop_x), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS},
     { "crop_w", "Crop width", OFFSET(crop_w), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS},
     { "blend", "Blending param", OFFSET(blend), AV_OPT_TYPE_INT, {.i64 = 128}, INT_MIN, INT_MAX, FLAGS},
-    { "scale_ow", "Scale output width", OFFSET(scale_ow), AV_OPT_TYPE_DOUBLE, {.dbl = 1.0}, INT_MIN, INT_MAX, FLAGS},
-    { "scale_oh", "Scale output height", OFFSET(scale_oh), AV_OPT_TYPE_DOUBLE, {.dbl = 1.0}, INT_MIN, INT_MAX, FLAGS},
+    { "scale_ow", "Scale output width", OFFSET(scale_ow), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS},
+    { "scale_oh", "Scale output height", OFFSET(scale_oh), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS},
     { "preview_ow", "Preview output width (for QT only)", OFFSET(preview_ow), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS},
     { "preview_oh", "Preview output height (for QT only)", OFFSET(preview_oh), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS},
     { "enable_gain_compensator", "Enable gain compensator", OFFSET(enable_gain_compensator), AV_OPT_TYPE_INT, {.i64 = 1}, 0, 1, FLAGS},
