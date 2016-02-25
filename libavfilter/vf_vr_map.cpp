@@ -320,8 +320,10 @@ static const AVOption vr_map_options[] = {
     { "crop_x", "Crop X", OFFSET(crop_x), AV_OPT_TYPE_INT, {0}, 0, INT_MAX, FLAGS},
     { "crop_w", "Crop width", OFFSET(crop_w), AV_OPT_TYPE_INT, {0}, 0, INT_MAX, FLAGS},
     { "blend", "Blending param", OFFSET(blend), AV_OPT_TYPE_INT, {128}, INT_MIN, INT_MAX, FLAGS},
-    { "scale_ow", "Scale output width", OFFSET(scale_ow), AV_OPT_TYPE_DOUBLE, {4607182418800017408L}, INT_MIN, INT_MAX, FLAGS},
-    { "scale_oh", "Scale output height", OFFSET(scale_oh), AV_OPT_TYPE_DOUBLE, {4607182418800017408L}, INT_MIN, INT_MAX, FLAGS},
+    { "scale_ow", "Scale output width", OFFSET(scale_ow), AV_OPT_TYPE_INT, {0}, INT_MIN, INT_MAX, FLAGS},
+    { "scale_oh", "Scale output height", OFFSET(scale_oh), AV_OPT_TYPE_INT, {0}, INT_MIN, INT_MAX, FLAGS},
+    { "preview_ow", "Preview output width (for QT only)", OFFSET(preview_ow), AV_OPT_TYPE_INT, {0}, 0, INT_MAX, FLAGS},
+    { "preview_oh", "Preview output height (for QT only)", OFFSET(preview_oh), AV_OPT_TYPE_INT, {0}, 0, INT_MAX, FLAGS},
     { "enable_gain_compensator", "Enable gain compensator", OFFSET(enable_gain_compensator), AV_OPT_TYPE_INT, {1}, 0, 1, FLAGS},
     { NULL }
 };
