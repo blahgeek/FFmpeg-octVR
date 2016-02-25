@@ -8,6 +8,10 @@
 #include <stdio.h>
 #include <math.h>
 
+#include <fstream>
+#include <iostream>
+#include <iomanip>
+
 extern "C" {
 #include "avfilter.h"
 #include "formats.h"
@@ -248,7 +252,7 @@ static int init(AVFilterContext *ctx) {
         int stop = output_strings_seq_pos[i];
         std::string filename = output_strings.substr(start, stop-start);
         av_log(ctx, AV_LOG_INFO, "Loading template %s\n", filename.c_str());
-        std::ifstream f(filename.c_str());
+        std::ifstream f(filename.c_str(), std::ios::binary);
         try {
             s->mapper_templates[i] = new vr::MapperTemplate(f);
         } catch (std::string & e) {
