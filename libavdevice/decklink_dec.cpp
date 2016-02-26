@@ -19,6 +19,9 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#ifdef _WIN32
+#include <winsock2.h>
+#endif
 #include <DeckLinkAPI.h>
 
 #include <pthread.h>
@@ -26,7 +29,9 @@
 
 #include <stdio.h>
 #include <signal.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 
 extern "C" {
 #include "libavformat/avformat.h"
@@ -150,13 +155,13 @@ static int avpacket_queue_get(AVPacketQueue *q, AVPacket *pkt, int block)
     pthread_mutex_unlock(&q->mutex);
     return ret;
 }
-
+#ifndef _WIN32
 static struct decklink_cctx * g_cctx = NULL;
 static void slave_got_signal(int signal) {
     if(g_cctx)
         g_cctx->ready = 1;
 }
-
+#endif
 class decklink_input_callback : public IDeckLinkInputCallback
 {
 public:
@@ -345,7 +350,7 @@ static HRESULT decklink_start_input(AVFormatContext *avctx)
 
     ctx->input_callback = new decklink_input_callback(avctx);
     ctx->dli->SetCallback(ctx->input_callback);
-
+#ifndef _WIN32
     if(cctx->slave) {
         g_cctx = cctx;
         av_log(avctx, AV_LOG_WARNING, "Waiting for master...\n");
@@ -370,7 +375,7 @@ static HRESULT decklink_start_input(AVFormatContext *avctx)
         for(int i = 0 ; i < pids.size() ; i += 1)
             kill(pids[i], SIGUSR1);
     }
-
+#endif
     return ctx->dli->StartStreams();
 }
 

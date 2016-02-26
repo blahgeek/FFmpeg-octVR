@@ -18,7 +18,9 @@
  * License along with FFmpeg; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
-
+#ifdef _WIN32
+#include <winsock2.h>
+#endif
 #include <DeckLinkAPI.h>
 
 #include <pthread.h>

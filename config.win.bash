@@ -17,10 +17,12 @@ PREFIX=`pwd`/../
     --enable-nonfree \
     --enable-nvenc \
     --enable-pthreads \
+    --enable-decklink \
     --enable-indev=dshow,decklink \
     --enable-outdev=decklink \
+    --extra-ldflags="/LIBPATH:\"C:/Qt/Qt5.5.1/5.5/msvc2013_64/lib\"" \
     --extra-cflags="-I../include -I../nvidia_video_sdk_6.0.1/Samples/common/inc -I../BlackmagicDeckLinkSDK/Win/include" \
-    --extra-libs="../lib/x64/pthreadVC2.lib ole32.lib user32.lib ../x64/vc12/staticlib/*.lib ../lib/x64/cuda_all.lib"
+    --extra-libs="../lib/x64/pthreadVC2.lib ole32.lib user32.lib Qt5Core.lib ../x64/vc12/staticlib/*.lib ../lib/x64/cuda_all.lib"
 #    --extra-libs="../lib/x64/pthreadVC2.lib ../x64/vc12/staticlib/opencv_calib3d310.lib         ../x64/vc12/staticlib/opencv_flann310.lib ../x64/vc12/staticlib/opencv_core310.lib            ../x64/vc12/staticlib/opencv_highgui310.lib ../x64/vc12/staticlib/opencv_cudaarithm310.lib      ../x64/vc12/staticlib/opencv_imgcodecs310.lib ../x64/vc12/staticlib/opencv_cudabgsegm310.lib      ../x64/vc12/staticlib/opencv_imgproc310.lib ../x64/vc12/staticlib/opencv_cudacodec310.lib       ../x64/vc12/staticlib/opencv_ml310.lib ../x64/vc12/staticlib/opencv_cudafeatures2d310.lib  ../x64/vc12/staticlib/opencv_objdetect310.lib ../x64/vc12/staticlib/opencv_cudafilters310.lib     ../x64/vc12/staticlib/opencv_octvr310.lib ../x64/vc12/staticlib/opencv_cudaimgproc310.lib     ../x64/vc12/staticlib/opencv_photo310.lib ../x64/vc12/staticlib/opencv_cudalegacy310.lib      ../x64/vc12/staticlib/opencv_shape310.lib ../x64/vc12/staticlib/opencv_cudaobjdetect310.lib   ../x64/vc12/staticlib/opencv_stitching310.lib ../x64/vc12/staticlib/opencv_cudaoptflow310.lib     ../x64/vc12/staticlib/opencv_superres310.lib ../x64/vc12/staticlib/opencv_cudastereo310.lib      ../x64/vc12/staticlib/opencv_ts310.lib ../x64/vc12/staticlib/opencv_cudawarping310.lib     ../x64/vc12/staticlib/opencv_video310.lib ../x64/vc12/staticlib/opencv_cudev310.lib           ../x64/vc12/staticlib/opencv_videoio310.lib ../x64/vc12/staticlib/opencv_features2d310.lib      ../x64/vc12/staticlib/opencv_videostab310.lib"
 #    --extra-ldflags="-L../lib/x64" \
 #    --enable-decklink \
