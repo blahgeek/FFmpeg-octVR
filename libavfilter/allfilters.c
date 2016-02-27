@@ -133,6 +133,7 @@ void avfilter_register_all(void)
     REGISTER_FILTER(CROP,           crop,           vf);
     REGISTER_FILTER(CROPDETECT,     cropdetect,     vf);
     REGISTER_FILTER(CURVES,         curves,         vf);
+    REGISTER_FILTER(GAINS,          gains,          vf);
     REGISTER_FILTER(DCTDNOIZ,       dctdnoiz,       vf);
     REGISTER_FILTER(DEBAND,         deband,         vf);
     REGISTER_FILTER(DECIMATE,       decimate,       vf);
