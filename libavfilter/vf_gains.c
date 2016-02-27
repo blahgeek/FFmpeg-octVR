@@ -21,7 +21,7 @@
 typedef struct {
     const AVClass *class;
 
-    double * gains;
+    float * gains;
     int gains_count;
 
     uint8_t lut[256];
@@ -37,7 +37,7 @@ typedef struct ThreadData {
     AVFrame *in, *out;
 } ThreadData;
 
-#define OFFSET(x) offsetof(CurvesContext, x)
+#define OFFSET(x) offsetof(GainsContext, x)
 #define FLAGS AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM
 static const AVOption gains_options[] = {
     { "file", "set data file name", OFFSET(gain_file), AV_OPT_TYPE_STRING, {.str=NULL}, .flags = FLAGS },
@@ -53,15 +53,15 @@ static av_cold int init(AVFilterContext *ctx) {
     if(!f)
         return AVERROR_INVALIDDATA;
     fscanf(f, "%d", &(gain_ctx->gains_count));
-    gain_ctx->gains = (double *)malloc(sizeof(double) * gain_ctx->gains_count);
+    gain_ctx->gains = (float *)malloc(sizeof(float) * gain_ctx->gains_count);
     for(int i = 0 ; i < gain_ctx->gains_count ; i += 1) {
-        int ret = fscanf(f, "%f", gain_ctx->gains_count + i);
+        int ret = fscanf(f, "%f", gain_ctx->gains + i);
         if(ret != 1)
             return AVERROR_INVALIDDATA;
     }
     fclose(f);
 
-    av_log(ctx, AV_LOG_INFO, "%d gains read");
+    av_log(ctx, AV_LOG_INFO, "%d gains read\n", gain_ctx->gains_count);
 
     return 0;
 }
@@ -113,9 +113,9 @@ static int filter_slice(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs)
 
     for (y = slice_start; y < slice_end; y++) {
         for (x = 0; x < in->width * step; x += step) {
-            dst[x + r] = gains_ctx->graph[R][src[x + r]];
-            dst[x + g] = gains_ctx->graph[G][src[x + g]];
-            dst[x + b] = gains_ctx->graph[B][src[x + b]];
+            dst[x + r] = gains_ctx->lut[src[x + r]];
+            dst[x + g] = gains_ctx->lut[src[x + g]];
+            dst[x + b] = gains_ctx->lut[src[x + b]];
             if (!direct && step == 4)
                 dst[x + a] = src[x + a];
         }
@@ -131,6 +131,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     AVFilterLink *outlink = ctx->outputs[0];
     AVFrame *out;
     ThreadData td;
+    GainsContext * gains_ctx = ctx->priv;
 
     if (av_frame_is_writable(in)) {
         out = in;
@@ -143,21 +144,20 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
         av_frame_copy_props(out, in);
     }
 
-    GainsContext * gains_ctx = ctx->priv;
-    av_log(ctx, AV_LOG_DEBUG, "Processing frame %d", gains_ctx->current_frame);
+    av_log(ctx, AV_LOG_DEBUG, "Processing frame %d\n", gains_ctx->current_frame);
     for(int i = 0 ; i < 256 ; i += 1) {
         int _x = i * gains_ctx->gains[gains_ctx->current_frame];
         if(_x > 255) _x = 255;
-        gains_ctx->lut[i] = uint8(_x);
+        gains_ctx->lut[i] = (uint8_t)(_x);
     }
 
     td.in  = in;
     td.out = out;
     ctx->internal->execute(ctx, filter_slice, &td, NULL, FFMIN(outlink->h, ctx->graph->nb_threads));
 
-    gain_ctx->current_frame += 1;
-    if(gain_ctx->current_frame >= gain_ctx->gains_count)
-        gain_ctx->current_frame = (gain_ctx->gains_count - 1);
+    gains_ctx->current_frame += 1;
+    if(gains_ctx->current_frame >= gains_ctx->gains_count)
+        gains_ctx->current_frame = (gains_ctx->gains_count - 1);
 
     if (out != in)
         av_frame_free(&in);
