@@ -2,7 +2,7 @@
 * @Author: BlahGeek
 * @Date:   2015-09-01
 * @Last Modified by:   BlahGeek
-* @Last Modified time: 2016-02-23
+* @Last Modified time: 2016-03-01
 */
 
 #include <stdio.h>
@@ -42,7 +42,9 @@ typedef struct {
     int scale_ow, scale_oh;
     int preview_ow, preview_oh;
 
+    int merge;
     int nb_outputs;
+    int nb_outputs_merged; // = merge ? 1 : nb_outputs
     vr::MapperTemplate ** mapper_templates;
 
     vr::AsyncMultiMapper * async_remapper;
@@ -89,7 +91,7 @@ static int push_frame(AVFilterContext * ctx) {
     vr::Timer timer("FFMpeg Filter");
 
     std::vector<AVFrame *> frames(s->nb_inputs, NULL);
-    std::vector<AVFrame *> out_frames(s->nb_outputs, NULL);
+    std::vector<AVFrame *> out_frames(s->nb_outputs_merged, NULL);
     std::vector<cv::Mat> in_mats, out_mats;
 
     if(queues_available) {
@@ -107,30 +109,55 @@ static int push_frame(AVFilterContext * ctx) {
         }
         timer.tick("Prepare inputs");
 
-        for(int i = 0 ; i < s->nb_outputs ; i += 1) {
-            int out_width = (s->scale_ow == 0) ? s->mapper_templates[i]->out_size.width : s->scale_ow;
-            int out_height = (s->scale_oh == 0) ? s->mapper_templates[i]->out_size.height : s->scale_oh;
+        std::vector<cv::Size> out_sizes;
+        cv::Size merge_size = cv::Size(0, 0);
+        for(int i = 0 ; i < s->nb_outputs_merged ; i += 1) {
+            cv::Size out_size = cv::Size(s->scale_ow, s->scale_oh);
+            if(out_size.area() == 0)
+                out_size = s->mapper_templates[i]->out_size;
             av_log(ctx, AV_LOG_INFO, "Output #%d: %dx%d (scaled from %dx%d)\n", i, 
-                   out_width, out_height, 
+                   out_size.width, out_size.height, 
                    s->mapper_templates[i]->out_size.width, s->mapper_templates[i]->out_size.height);
-            out_frames[i] = ff_get_video_buffer(ctx->outputs[i], out_width, out_height);
-            av_frame_copy_props(out_frames[i], frames[0]);
-
-            out_mats.emplace_back(out_height, out_width, CV_8UC2,
-                                  out_frames[i]->data[0], out_frames[i]->linesize[0]);
+            out_sizes.push_back(out_size);
+            merge_size.width = out_size.width;
+            merge_size.height += out_size.height;
         }
+
+        if(s->merge) {
+            av_log(ctx, AV_LOG_INFO, "Merge output: %dx%d\n", merge_size.width, merge_size.height);
+            out_frames[0] = ff_get_video_buffer(ctx->outputs[0], merge_width, merge_height);
+            av_frame_copy_props(out_frames[0], frames[0]);
+
+            int current_height = 0;
+            for(int i = 0 ; i < s->nb_outputs ; i += 1) {
+                out_mats.emplace_back(out_sizes[i], CV_8UC2,
+                                      out_frames[0]->data[0] + out_frames[0]->linesize[0] * current_height,
+                                      out_frames[0]->linesize[0]);
+                current_height += out_size[i].height;
+            }
+        }
+        else {
+            for(int i = 0 ; i < s->nb_outputs ; i += 1) {
+                out_frames[i] = ff_get_video_buffer(ctx->outputs[i], out_size.width, out_size.height);
+                av_frame_copy_props(out_frames[i], frames[0]);
+
+                out_mats.emplace_back(out_size.height, out_size.width, CV_8UC2,
+                                      out_frames[i]->data[0], out_frames[i]->linesize[0]);
+            }
+        }
+
         timer.tick("Prepare outputs");
         s->async_remapper->push(in_mats, out_mats);
     }
 
-    AVFrame ** real_out_frames = new AVFrame * [s->nb_outputs];
+    AVFrame ** real_out_frames = new AVFrame * [s->nb_outputs_merged];
     if(!has_last_frame) {
-        for(int i = 0 ; i < s->nb_outputs ; i += 1)
+        for(int i = 0 ; i < s->nb_outputs_merged ; i += 1)
             real_out_frames[i] = NULL;
-        s->last_frames = new AVFrame *[s->nb_inputs + s->nb_outputs];
+        s->last_frames = new AVFrame *[s->nb_inputs + s->nb_outputs_merged];
     } else {
         s->async_remapper->pop();
-        for(int i = 0 ; i < s->nb_outputs ; i += 1)
+        for(int i = 0 ; i < s->nb_outputs_merged ; i += 1)
             real_out_frames[i] = s->last_frames[s->nb_inputs + i];
         for(int i = 0 ; i < s->nb_inputs ; i += 1)
             av_frame_free(&s->last_frames[i]);
@@ -140,14 +167,14 @@ static int push_frame(AVFilterContext * ctx) {
     if(queues_available) {
         for(int i = 0 ; i < s->nb_inputs ; i += 1)
             s->last_frames[i] = frames[i];
-        for(int i = 0 ; i < s->nb_outputs ; i += 1)
+        for(int i = 0 ; i < s->nb_outputs_merged ; i += 1)
             s->last_frames[s->nb_inputs + i] = out_frames[i];
     } else {
         delete [] s->last_frames;
         s->last_frames = NULL;
     }
 
-    for(int i = 0 ; i < s->nb_outputs ; i += 1)
+    for(int i = 0 ; i < nb_outputs_merged ; i += 1)
         if(real_out_frames[i])
             ff_filter_frame(ctx->outputs[i], real_out_frames[i]);
     timer.tick("Do next filter");
@@ -213,6 +240,28 @@ static int config_output(AVFilterLink *link)
     return 0;
 }
 
+static int config_merge_output(AVFilterLink *link) {
+    VRMapContext *s = static_cast<VRMapContext *>(link->src->priv);
+
+    int width = -1;
+    int total_height = 0;
+    for(int i = 0 ; i < s->nb_outputs ; i += 1) {
+        cv::Size out_size = cv::Size(s->scale_ow, s->scale_oh);
+        if(out_size.area() == 0)
+            out_size = s->mapper_templates[out_no]->out_size;
+        if(width > 0 && out_size.width != width) {
+            av_log(link->src, AV_LOG_ERROR, "Output width does not match while merge = 1\n");
+            return AVERROR_INVALIDDATA;
+        }
+        width = out_size.width;
+        total_height += out_size.height;
+    }
+
+    link->w = width;
+    link->h = total_height;
+    return 0;
+}
+
 static int request_frame(AVFilterLink *outlink) {
     AVFilterContext *ctx = outlink->src;
     VRMapContext *s = static_cast<VRMapContext *>(ctx->priv);
@@ -272,12 +321,19 @@ static int init(AVFilterContext *ctx) {
                s->mapper_templates[i]->out_size.height);
     }
 
-    for(int i = 0 ; i < s->nb_outputs ; i += 1) {
+    if(s->preview_ow * s->preview_oh > 0 && s->nb_outputs > 1) {
+        av_log(ctx, AV_LOG_ERROR, "Preview is not available while outputs > 1\n");
+        return AVERROR_INVALIDDATA;
+    }
+
+    s->nb_outputs_merged = (s->merge ? 1 : s->nb_outputs);
+
+    for(int i = 0 ; i < s->nb_outputs_merged ; i += 1) {
         AVFilterPad outpad = { 0 };
         outpad.name = av_strdup(av_asprintf("output%d", i));
         outpad.type = AVMEDIA_TYPE_VIDEO;
         outpad.request_frame = request_frame;
-        outpad.config_props = config_output;
+        outpad.config_props = (s->merge ? config_merge_output : config_output);
         ff_insert_outpad(ctx, i, &outpad);
     }
 
@@ -317,6 +373,7 @@ static const AVOption vr_map_options[] = {
     { "preview_ow", "Preview output width (for QT only)", OFFSET(preview_ow), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS},
     { "preview_oh", "Preview output height (for QT only)", OFFSET(preview_oh), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, FLAGS},
     { "enable_gain_compensator", "Enable gain compensator", OFFSET(enable_gain_compensator), AV_OPT_TYPE_INT, {.i64 = 1}, 0, 1, FLAGS},
+    { "merge", "Merge multiple output (verticle)", OFFSET(merge), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 1, FLAGS},
     { NULL }
 };
 
