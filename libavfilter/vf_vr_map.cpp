@@ -111,7 +111,7 @@ static int push_frame(AVFilterContext * ctx) {
 
         std::vector<cv::Size> out_sizes;
         cv::Size merge_size = cv::Size(0, 0);
-        for(int i = 0 ; i < s->nb_outputs_merged ; i += 1) {
+        for(int i = 0 ; i < s->nb_outputs ; i += 1) {
             cv::Size out_size = cv::Size(s->scale_ow, s->scale_oh);
             if(out_size.area() == 0)
                 out_size = s->mapper_templates[i]->out_size;
@@ -125,7 +125,7 @@ static int push_frame(AVFilterContext * ctx) {
 
         if(s->merge) {
             av_log(ctx, AV_LOG_INFO, "Merge output: %dx%d\n", merge_size.width, merge_size.height);
-            out_frames[0] = ff_get_video_buffer(ctx->outputs[0], merge_width, merge_height);
+            out_frames[0] = ff_get_video_buffer(ctx->outputs[0], merge_size.width, merge_size.height);
             av_frame_copy_props(out_frames[0], frames[0]);
 
             int current_height = 0;
@@ -133,15 +133,15 @@ static int push_frame(AVFilterContext * ctx) {
                 out_mats.emplace_back(out_sizes[i], CV_8UC2,
                                       out_frames[0]->data[0] + out_frames[0]->linesize[0] * current_height,
                                       out_frames[0]->linesize[0]);
-                current_height += out_size[i].height;
+                current_height += out_sizes[i].height;
             }
         }
         else {
             for(int i = 0 ; i < s->nb_outputs ; i += 1) {
-                out_frames[i] = ff_get_video_buffer(ctx->outputs[i], out_size.width, out_size.height);
+                out_frames[i] = ff_get_video_buffer(ctx->outputs[i], out_sizes[i].width, out_sizes[i].height);
                 av_frame_copy_props(out_frames[i], frames[0]);
 
-                out_mats.emplace_back(out_size.height, out_size.width, CV_8UC2,
+                out_mats.emplace_back(out_sizes[i], CV_8UC2,
                                       out_frames[i]->data[0], out_frames[i]->linesize[0]);
             }
         }
@@ -174,7 +174,7 @@ static int push_frame(AVFilterContext * ctx) {
         s->last_frames = NULL;
     }
 
-    for(int i = 0 ; i < nb_outputs_merged ; i += 1)
+    for(int i = 0 ; i < s->nb_outputs_merged ; i += 1)
         if(real_out_frames[i])
             ff_filter_frame(ctx->outputs[i], real_out_frames[i]);
     timer.tick("Do next filter");
@@ -248,7 +248,7 @@ static int config_merge_output(AVFilterLink *link) {
     for(int i = 0 ; i < s->nb_outputs ; i += 1) {
         cv::Size out_size = cv::Size(s->scale_ow, s->scale_oh);
         if(out_size.area() == 0)
-            out_size = s->mapper_templates[out_no]->out_size;
+            out_size = s->mapper_templates[i]->out_size;
         if(width > 0 && out_size.width != width) {
             av_log(link->src, AV_LOG_ERROR, "Output width does not match while merge = 1\n");
             return AVERROR_INVALIDDATA;
