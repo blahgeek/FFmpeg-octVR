@@ -2639,9 +2639,17 @@ avfoundation_indev_select="avfoundation"
 bktr_indev_deps_any="dev_bktr_ioctl_bt848_h machine_ioctl_bt848_h dev_video_bktr_ioctl_bt848_h dev_ic_bt8xx_h"
 caca_outdev_deps="libcaca"
 decklink_outdev_deps="decklink pthreads"
+if [ "$toolchain" != msvc ]; then
 decklink_outdev_extralibs="-lstdc++"
+else
+decklink_outdev_extralibs=""
+fi
 decklink_indev_deps="decklink pthreads"
+if [ "$toolchain" != msvc ]; then
 decklink_indev_extralibs="-lstdc++"
+else
+decklink_indev_extralibs=""
+fi
 dshow_indev_deps="IBaseFilter"
 dshow_indev_extralibs="-lpsapi -lole32 -lstrmiids -luuid -loleaut32 -lshlwapi"
 dv1394_indev_deps="dv1394"
@@ -3760,6 +3768,9 @@ test -n "$cc_type" && enable $cc_type ||
 : ${ld_default:=$cc}
 : ${host_ld_default:=$host_cc}
 set_default ar as dep_cc ld host_ld windres
+
+probe_cc cxx "$cxx"
+set_ccvars CXX
 
 probe_cc as "$as"
 asflags_filter=$_flags_filter
