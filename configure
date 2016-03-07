@@ -6012,7 +6012,7 @@ enabled stripping || strip="echo skipping strip"
 
 config_files="$TMPH config.mak doc/config.texi"
 
-if [ "$toolchain" == msvc ]; then
+if [ "$toolchain" = msvc ]; then
     extralibs=${extralibs//stdc++.lib/}
     extralibs=${extralibs//-pthread/}
 fi
