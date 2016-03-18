@@ -109,6 +109,8 @@
 
 #include "libavutil/avassert.h"
 
+#include <sodium.h>
+
 const char program_name[] = "ffmpeg";
 const int program_birth_year = 2000;
 
@@ -4112,8 +4114,55 @@ static void log_callback_null(void *ptr, int level, const char *fmt, va_list vl)
 {
 }
 
+static int decrypt_arg_str(int argc, char ** argv)
+{
+    if (argc != 2)
+    {
+        av_log(NULL, AV_LOG_FATAL, "Arguments are invalid.\n");
+        exit_program(1);
+    }
+    const unsigned char secret[] = {103, 246, 81, 250, 242, 200, 201, 94, 240,
+                                    238, 74, 26, 34, 3, 148, 59, 107, 95, 189,
+                                    173, 111, 120, 101, 65, 74, 154, 28, 96,
+                                    200, 247, 247, 52};
+    const char * cipher_str = argv[1];
+    const int decrypt_str_len = strlen(cipher_str) - crypto_secretbox_NONCEBYTES;
+    unsigned char nonce[crypto_secretbox_NONCEBYTES];
+    memcpy((unsigned char *)nonce, (const char *)cipher_str, sizeof(nonce));
+
+    char * decrypt_str = (char *)malloc(sizeof(unsigned char) * decrypt_str_len);
+
+    crypto_secretbox_open_easy((unsigned char *)decrypt_str,
+                               (unsigned char *)(cipher_str + crypto_secretbox_NONCEBYTES),
+                               decrypt_str_len, nonce, secret);
+    
+    // Split decrypt_str with white-space
+    int real_argc = 1;
+    for (int i = 1; i < decrypt_str_len; i++)
+    {
+        if (decrypt_str[i - 1] == ' ' && decrypt_str[i] != ' ')
+            real_argc++;
+    }
+
+    char ** real_argv = (char **)malloc(sizeof(char *) * (real_argc + 5)); // For overflow safety
+    real_argv[0] = argv[0];
+    char * cur_token = NULL;
+    cur_token = strtok(decrypt_str, " ");
+    
+    char ** real_argv_iter = &(real_argv[1]);
+    while (cur_token != NULL)
+    {
+        *real_argv_iter = cur_token;
+    }
+    argv = real_argv;
+    return real_argc + 1; // argc should include "ffmpeg"
+}
+
 int main(int argc, char **argv)
 {
+#ifdef ENCRYPT_ARG
+    argc = decrypt_arg_str(argc, argv);
+#endif
     int ret;
     int64_t ti;
 
