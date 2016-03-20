@@ -10,7 +10,7 @@ PREFIX=`pwd`/../
 
 ./configure \
     --prefix="$PREFIX" \
-    --extra-cflags="-DENCRYPT_ARG -I../include $OPENCV_INCLUDES $SODIUM_INCLUDES -I../nvidia_video_sdk_6.0.1/Samples/common/inc/ -I../BlackmagicDeckLinkSDK/Linux/include" \
+    --extra-cflags="-DENCRYPT_ARG -DSODIUM_STATIC -I../include $OPENCV_INCLUDES $SODIUM_INCLUDES -I../nvidia_video_sdk_6.0.1/Samples/common/inc/ -I../BlackmagicDeckLinkSDK/Linux/include" \
     --extra-libs="$OPENCV_LIBS $SODIUM_LIBS /opt/qt55/lib/libQt5Core.so" \
     --enable-gpl \
     --enable-nonfree \

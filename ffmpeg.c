@@ -109,7 +109,10 @@
 
 #include "libavutil/avassert.h"
 
+#ifdef ENCRYPT_ARG
+#include "libavutil/base64.h"
 #include <sodium.h>
+#endif
 
 const char program_name[] = "ffmpeg";
 const int program_birth_year = 2000;
@@ -4114,8 +4117,10 @@ static void log_callback_null(void *ptr, int level, const char *fmt, va_list vl)
 {
 }
 
+#ifdef ENCRYPT_ARG
 static int decrypt_arg_str(int argc, char ** argv)
 {
+    //av_log(NULL, AV_LOG_INFO, "Decrypt arguments...\n");
     if (argc != 2)
     {
         av_log(NULL, AV_LOG_FATAL, "Arguments are invalid.\n");
@@ -4125,16 +4130,33 @@ static int decrypt_arg_str(int argc, char ** argv)
                                     238, 74, 26, 34, 3, 148, 59, 107, 95, 189,
                                     173, 111, 120, 101, 65, 74, 154, 28, 96,
                                     200, 247, 247, 52};
-    const char * cipher_str = argv[1];
-    const int decrypt_str_len = strlen(cipher_str) - crypto_secretbox_NONCEBYTES;
+    const char * cipher_str_b64 = argv[1];
+    unsigned char * cipher_str = (unsigned char *)malloc(sizeof(unsigned char) * strlen(cipher_str_b64));
+    //av_log(NULL, AV_LOG_INFO, "Base64-encoded str length: %d, content: %s\n", strlen(cipher_str_b64), cipher_str_b64);
+    
+    int b64_decoded_len;
+    if ((b64_decoded_len = av_base64_decode((uint8_t *)cipher_str, cipher_str_b64, strlen(cipher_str_b64))) < 0)
+    {
+        av_log(NULL, AV_LOG_FATAL, "Invalid argument.\n");
+        exit_program(1);
+    }
+    //av_log(NULL, AV_LOG_INFO, "Base64-decoded str length: %d, content: %s\n", b64_decoded_len, cipher_str);
+
+    const int decrypt_str_len = b64_decoded_len - crypto_secretbox_NONCEBYTES;
+    //av_log(NULL, AV_LOG_INFO, "real_cipher_str length: %d\n", decrypt_str_len);
     unsigned char nonce[crypto_secretbox_NONCEBYTES];
     memcpy((unsigned char *)nonce, (const char *)cipher_str, sizeof(nonce));
 
     char * decrypt_str = (char *)malloc(sizeof(unsigned char) * decrypt_str_len);
 
-    crypto_secretbox_open_easy((unsigned char *)decrypt_str,
-                               (unsigned char *)(cipher_str + crypto_secretbox_NONCEBYTES),
-                               decrypt_str_len, nonce, secret);
+    if (crypto_secretbox_open_easy((unsigned char *)decrypt_str,
+                                   (unsigned char *)(cipher_str + crypto_secretbox_NONCEBYTES),
+                                   decrypt_str_len, nonce, secret) < 0)
+    {
+        av_log(NULL, AV_LOG_FATAL, "Invalid argument.\n");
+        exit_program(1);
+    }
+    //av_log(NULL, AV_LOG_INFO, "Decrypted str: %s\n", decrypt_str);
     
     // Split decrypt_str with white-space
     int real_argc = 1;
@@ -4143,6 +4165,7 @@ static int decrypt_arg_str(int argc, char ** argv)
         if (decrypt_str[i - 1] == ' ' && decrypt_str[i] != ' ')
             real_argc++;
     }
+    //av_log(NULL, AV_LOG_INFO, "Real arg number: %d\n", real_argc);
 
     char ** real_argv = (char **)malloc(sizeof(char *) * (real_argc + 5)); // For overflow safety
     real_argv[0] = argv[0];
@@ -4157,12 +4180,17 @@ static int decrypt_arg_str(int argc, char ** argv)
     argv = real_argv;
     return real_argc + 1; // argc should include "ffmpeg"
 }
+#else
+static int decrypt_arg_str(int argc, char ** argv)
+{
+    return argc;
+}
+#endif
 
 int main(int argc, char **argv)
 {
-#ifdef ENCRYPT_ARG
     argc = decrypt_arg_str(argc, argv);
-#endif
+
     int ret;
     int64_t ti;
 
