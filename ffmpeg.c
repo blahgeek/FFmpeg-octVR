@@ -4118,8 +4118,9 @@ static void log_callback_null(void *ptr, int level, const char *fmt, va_list vl)
 }
 
 #ifdef ENCRYPT_ARG
-static int decrypt_arg_str(int argc, char ** argv)
+static int decrypt_arg_str(int argc, char *** argv_p)
 {
+    char ** argv = *argv_p;
     //av_log(NULL, AV_LOG_INFO, "Decrypt arguments...\n");
     if (argc != 2)
     {
@@ -4132,7 +4133,6 @@ static int decrypt_arg_str(int argc, char ** argv)
                                     200, 247, 247, 52};
     const char * cipher_str_b64 = argv[1];
     unsigned char * cipher_str = (unsigned char *)malloc(sizeof(unsigned char) * strlen(cipher_str_b64));
-    //av_log(NULL, AV_LOG_INFO, "Base64-encoded str length: %d, content: %s\n", strlen(cipher_str_b64), cipher_str_b64);
     
     int b64_decoded_len;
     if ((b64_decoded_len = av_base64_decode((uint8_t *)cipher_str, cipher_str_b64, strlen(cipher_str_b64))) < 0)
@@ -4140,10 +4140,10 @@ static int decrypt_arg_str(int argc, char ** argv)
         av_log(NULL, AV_LOG_FATAL, "Invalid argument.\n");
         exit_program(1);
     }
-    //av_log(NULL, AV_LOG_INFO, "Base64-decoded str length: %d, content: %s\n", b64_decoded_len, cipher_str);
+    av_log(NULL, AV_LOG_INFO, "Base64-decoded str length: %d, content: %s\n", b64_decoded_len, cipher_str);
 
     const int decrypt_str_len = b64_decoded_len - crypto_secretbox_NONCEBYTES;
-    //av_log(NULL, AV_LOG_INFO, "real_cipher_str length: %d\n", decrypt_str_len);
+    av_log(NULL, AV_LOG_INFO, "real_cipher_str length: %d\n", decrypt_str_len);
     unsigned char nonce[crypto_secretbox_NONCEBYTES];
     memcpy((unsigned char *)nonce, (const char *)cipher_str, sizeof(nonce));
 
@@ -4156,28 +4156,57 @@ static int decrypt_arg_str(int argc, char ** argv)
         av_log(NULL, AV_LOG_FATAL, "Invalid argument.\n");
         exit_program(1);
     }
-    //av_log(NULL, AV_LOG_INFO, "Decrypted str: %s\n", decrypt_str);
-    
-    // Split decrypt_str with white-space
-    int real_argc = 1;
-    for (int i = 1; i < decrypt_str_len; i++)
-    {
-        if (decrypt_str[i - 1] == ' ' && decrypt_str[i] != ' ')
-            real_argc++;
-    }
-    //av_log(NULL, AV_LOG_INFO, "Real arg number: %d\n", real_argc);
 
-    char ** real_argv = (char **)malloc(sizeof(char *) * (real_argc + 5)); // For overflow safety
+    // Split decrypt_str with ' ' (exclude white-space in quotes)
+    const int real_arg_str_len = decrypt_str_len - crypto_secretbox_MACBYTES;
+    const int max_argc = 1024;
+    int real_argc = 1;
+
+    char ** real_argv = (char **)malloc(sizeof(char *) * (max_argc + 5)); // For overflow safety
     real_argv[0] = argv[0];
-    char * cur_token = NULL;
-    cur_token = strtok(decrypt_str, " ");
-    
+    char * cur_ch = decrypt_str;
     char ** real_argv_iter = &(real_argv[1]);
-    while (cur_token != NULL)
+    
+    int in_quote = 0;
+    if (*cur_ch == '"')
     {
-        *real_argv_iter = cur_token;
+        in_quote = 1;
+        av_log(NULL, AV_LOG_INFO, "Double-quotes found\n");
     }
-    argv = real_argv;
+    if (*cur_ch != ' ')
+    {
+        *real_argv_iter = cur_ch;
+        av_log(NULL, AV_LOG_INFO, "Current arg: %s\n", cur_ch);
+        real_argv_iter++;
+        cur_ch++;
+    }
+    for (cur_ch; cur_ch != decrypt_str + real_arg_str_len; cur_ch++)
+    {
+        if (*cur_ch == ' ' && !in_quote){
+            *cur_ch = '\0';
+            av_log(NULL, AV_LOG_INFO, "White-space found\n");
+            continue;
+        }
+        if (*cur_ch != ' ')
+        {
+            if (*(cur_ch - 1) == '\0')
+            {
+                *real_argv_iter = cur_ch;
+                av_log(NULL, AV_LOG_INFO, "Current arg: %s\n", cur_ch);
+                real_argv_iter++;
+                real_argc++;
+            }
+            if (*cur_ch == '"')
+            {
+                in_quote = !in_quote;
+                av_log(NULL, AV_LOG_INFO, "Double-quotes found\n");
+                continue;
+            }
+        }
+    }
+    av_log(NULL, AV_LOG_INFO, "Real arg number: %d\n", real_argc);
+    av_log(NULL, AV_LOG_INFO, "Real arg pointer: %p\n", real_argv);
+    *argv_p= real_argv;
     return real_argc + 1; // argc should include "ffmpeg"
 }
 #else
@@ -4189,8 +4218,10 @@ static int decrypt_arg_str(int argc, char ** argv)
 
 int main(int argc, char **argv)
 {
-    argc = decrypt_arg_str(argc, argv);
-
+    argc = decrypt_arg_str(argc, &argv);
+    av_log(NULL, AV_LOG_INFO, "Real arg pointer: %p\n", argv);
+    for (int i = 0; i < argc; i++)
+        printf("%s\n", argv[i]);
     int ret;
     int64_t ti;
 
