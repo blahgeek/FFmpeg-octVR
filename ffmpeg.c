@@ -4146,6 +4146,7 @@ static int decrypt_arg_str(int argc, char *** argv_p)
     memcpy((unsigned char *)nonce, (const char *)cipher_str, sizeof(nonce));
 
     char * decrypt_str = (char *)malloc(sizeof(unsigned char) * decrypt_str_len);
+    memset((char *)decrypt_str, 0, decrypt_str_len);
 
     if (crypto_secretbox_open_easy((unsigned char *)decrypt_str,
                                    (unsigned char *)(cipher_str + crypto_secretbox_NONCEBYTES),
