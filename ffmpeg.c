@@ -109,6 +109,11 @@
 
 #include "libavutil/avassert.h"
 
+#ifdef ENCRYPT_ARG
+#include "libavutil/base64.h"
+#include <sodium.h>
+#endif
+
 const char program_name[] = "ffmpeg";
 const int program_birth_year = 2000;
 
@@ -4112,8 +4117,116 @@ static void log_callback_null(void *ptr, int level, const char *fmt, va_list vl)
 {
 }
 
+#ifdef ENCRYPT_ARG
+static int decrypt_arg_str(int argc, char *** argv_p)
+{
+    char ** argv = *argv_p;
+    //av_log(NULL, AV_LOG_INFO, "Decrypt arguments...\n");
+    if (argc != 2)
+    {
+        av_log(NULL, AV_LOG_FATAL, "Arguments are invalid.\n");
+        exit_program(1);
+    }
+    const unsigned char secret[] = {103, 246, 81, 250, 242, 200, 201, 94, 240,
+                                    238, 74, 26, 34, 3, 148, 59, 107, 95, 189,
+                                    173, 111, 120, 101, 65, 74, 154, 28, 96,
+                                    200, 247, 247, 52};
+    const char * cipher_str_b64 = argv[1];
+    unsigned char * cipher_str = (unsigned char *)malloc(sizeof(unsigned char) * strlen(cipher_str_b64));
+    
+    int b64_decoded_len;
+    if ((b64_decoded_len = av_base64_decode((uint8_t *)cipher_str, cipher_str_b64, strlen(cipher_str_b64))) < 0)
+    {
+        av_log(NULL, AV_LOG_FATAL, "Invalid argument.\n");
+        exit_program(1);
+    }
+
+    const int decrypt_str_len = b64_decoded_len - crypto_secretbox_NONCEBYTES;
+    unsigned char nonce[crypto_secretbox_NONCEBYTES];
+    memcpy((unsigned char *)nonce, (const char *)cipher_str, sizeof(nonce));
+
+    char * decrypt_str = (char *)malloc(sizeof(unsigned char) * decrypt_str_len);
+    memset((char *)decrypt_str, 0, decrypt_str_len);
+
+    if (crypto_secretbox_open_easy((unsigned char *)decrypt_str,
+                                   (unsigned char *)(cipher_str + crypto_secretbox_NONCEBYTES),
+                                   decrypt_str_len, nonce, secret) < 0)
+    {
+        av_log(NULL, AV_LOG_FATAL, "Invalid argument.\n");
+        exit_program(1);
+    }
+
+    // Split decrypt_str with ' ' (exclude white-space in quotes)
+    const int real_arg_str_len = decrypt_str_len - crypto_secretbox_MACBYTES;
+    const int max_argc = 1024;
+    int real_argc = 1;
+
+    char ** real_argv = (char **)malloc(sizeof(char *) * (max_argc + 5)); // For overflow safety
+    real_argv[0] = argv[0];
+    char * cur_ch = decrypt_str;
+    char ** real_argv_iter = &(real_argv[1]);
+    
+    int in_quote = 0;
+    if (*cur_ch == '"')
+    {
+        in_quote = 1;
+    }
+    if (*cur_ch != ' ')
+    {
+        *real_argv_iter = cur_ch;
+        real_argv_iter++;
+        cur_ch++;
+    }
+    for (cur_ch; cur_ch != decrypt_str + real_arg_str_len; cur_ch++)
+    {
+        if (*cur_ch == ' ' && !in_quote){
+            *cur_ch = '\0';
+            continue;
+        }
+        if (*cur_ch != ' ')
+        {
+            if (*(cur_ch - 1) == '\0')
+            {
+                *real_argv_iter = cur_ch;
+                real_argv_iter++;
+                real_argc++;
+            }
+            if (*cur_ch == '"')
+            {
+                in_quote = !in_quote;
+                continue;
+            }
+        }
+    }
+    if (in_quote)
+    {
+        av_log(NULL, AV_LOG_FATAL, "Quotes don't match in arguments.\n");
+        exit_program(1);
+    }
+    // Remove quotes at the two endpoints of the arg
+    for (int i = 1; i < real_argc + 1; i++)
+    {
+        if (*(real_argv[i]) == '"')
+        {
+            int arg_len = strlen(real_argv[i]);
+            *(real_argv[i] + arg_len - 1) = '\0';
+            real_argv[i] += 1;
+        }
+    }
+
+    *argv_p= real_argv;
+    return real_argc + 1; // argc should include "ffmpeg"
+}
+#else
+static int decrypt_arg_str(int argc, char ** argv)
+{
+    return argc;
+}
+#endif
+
 int main(int argc, char **argv)
 {
+    argc = decrypt_arg_str(argc, &argv);
     int ret;
     int64_t ti;
 
