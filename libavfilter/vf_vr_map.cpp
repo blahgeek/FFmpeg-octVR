@@ -2,7 +2,7 @@
 * @Author: BlahGeek
 * @Date:   2015-09-01
 * @Last Modified by:   BlahGeek
-* @Last Modified time: 2016-03-01
+* @Last Modified time: 2016-03-30
 */
 
 #include <stdio.h>
@@ -323,11 +323,6 @@ static int init(AVFilterContext *ctx) {
         av_log(ctx, AV_LOG_INFO, "Load complete, size: %dx%d\n",
                s->mapper_templates[i]->out_size.width,
                s->mapper_templates[i]->out_size.height);
-    }
-
-    if(s->preview_ow * s->preview_oh > 0 && s->nb_outputs > 1) {
-        av_log(ctx, AV_LOG_ERROR, "Preview is not available while outputs > 1\n");
-        return AVERROR_INVALIDDATA;
     }
 
     s->nb_outputs_merged = (s->merge ? 1 : s->nb_outputs);
