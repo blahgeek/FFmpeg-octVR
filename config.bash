@@ -3,13 +3,13 @@
 export PKG_CONFIG_PATH=/usr/lib64/pkgconfig/:`pwd`/../lib/pkgconfig/
 echo $PKG_CONFIG_PATH
 OPENCV_INCLUDES=$(pkg-config --cflags opencv)
-OPENCV_LIBS=$(pkg-config --libs --static opencv | sed 's/-L-L/-L/' | sed 's/-l64//' | sed 's/Qt5::Core/Qt5Core/')
+OPENCV_LIBS=$(pkg-config --libs --static opencv | sed 's/-L-L/-L/' | sed 's/-l64//')
 PREFIX=`pwd`/../
 
 ./configure \
     --prefix="$PREFIX" \
     --extra-cflags="-I../include $OPENCV_INCLUDES -I../nvidia_video_sdk_6.0.1/Samples/common/inc/ -I../BlackmagicDeckLinkSDK/Linux/include" \
-    --extra-libs="$OPENCV_LIBS /opt/qt55/lib/libQt5Core.so" \
+    --extra-libs="$OPENCV_LIBS" \
     --enable-gpl \
     --enable-nonfree \
     --enable-nvenc \
