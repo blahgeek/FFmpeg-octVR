@@ -376,6 +376,7 @@ static const AVOption vr_map_options[] = {
     { "preview_ow", "Preview output width (for QT only)", OFFSET(preview_ow), AV_OPT_TYPE_INT, {0}, 0, INT_MAX, FLAGS},
     { "preview_oh", "Preview output height (for QT only)", OFFSET(preview_oh), AV_OPT_TYPE_INT, {0}, 0, INT_MAX, FLAGS},
     { "enable_gain_compensator", "Enable gain compensator", OFFSET(enable_gain_compensator), AV_OPT_TYPE_INT, {1}, 0, 1, FLAGS},
+    { "merge", "Merge multiple output (verticle)", OFFSET(merge), AV_OPT_TYPE_INT, {0}, 0, 1, FLAGS},
     { NULL }
 };
 #else
