@@ -336,6 +336,11 @@ static int init(AVFilterContext *ctx) {
         ff_insert_outpad(ctx, i, &outpad);
     }
 
+    if(s->merge) {
+        s->scale_oh /= s->nb_outputs;
+        av_log(ctx, AV_LOG_INFO, "Merge mode, split scale_oh to %d\n");
+    }
+
     return 0;
 }
 
