@@ -2,7 +2,7 @@
 * @Author: BlahGeek
 * @Date:   2015-09-01
 * @Last Modified by:   BlahGeek
-* @Last Modified time: 2016-03-30
+* @Last Modified time: 2016-04-24
 */
 
 #include <stdio.h>
@@ -42,6 +42,8 @@ typedef struct {
     int blend;
     int enable_gain_compensator;
 
+    int input_format;
+
     int crop_x, crop_w;
     int scale_ow, scale_oh;
     int preview_ow, preview_oh;
@@ -63,6 +65,7 @@ static int query_formats(AVFilterContext *ctx)
 {
     AVFilterFormats *formats = NULL;
     ff_add_format(&formats, AV_PIX_FMT_UYVY422);
+    ff_add_format(&formats, AV_PIX_FMT_YUYV422);
     for(int i = 0 ; i < ctx->nb_inputs; i += 1) {
         if(ctx->inputs[i] && !ctx->inputs[i]->out_formats)
             ff_formats_ref(formats, &ctx->inputs[i]->out_formats);
@@ -209,6 +212,15 @@ static int config_input(AVFilterLink *inlink) {
         av_log(ctx, AV_LOG_WARNING, "Using width %d for input %d\n", s->crop_w, in_no);
     s->in_sizes[in_no] = cv::Size(s->crop_w != 0 ? s->crop_w : inlink->w, inlink->h);
 
+    if(s->input_format != 0 && s->input_format != inlink->format) {
+        av_log(ctx, AV_LOG_ERROR, "Pixel formats for all inputs should be same.\n");
+        return -1;
+    }
+    if(s->input_format == 0) {
+        s->input_format = inlink->format;
+        av_assert0(s->input_format == AV_PIX_FMT_UYVY422 || s->input_format == AV_PIX_FMT_YUYV422);
+    }
+
     if(in_no == s->nb_inputs - 1) {
         std::vector<vr::MapperTemplate> _templates;
         std::vector<cv::Size> _scale_outputs;
@@ -223,7 +235,8 @@ static int config_input(AVFilterLink *inlink) {
         s->async_remapper = vr::AsyncMultiMapper::New(_templates, _sizes, 
                                                       s->blend, s->enable_gain_compensator, 
                                                       _scale_outputs,
-                                                      cv::Size(s->preview_ow, s->preview_oh));
+                                                      cv::Size(s->preview_ow, s->preview_oh),
+                                                      s->input_format == AV_PIX_FMT_UYVY422 ? AsyncMultiMapper::UYVY422 : AsyncMultiMapper::YUYV422);
         av_log(ctx, AV_LOG_INFO, "Init async remapper done\n");
     }
 
