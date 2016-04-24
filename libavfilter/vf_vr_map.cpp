@@ -236,7 +236,7 @@ static int config_input(AVFilterLink *inlink) {
                                                       s->blend, s->enable_gain_compensator, 
                                                       _scale_outputs,
                                                       cv::Size(s->preview_ow, s->preview_oh),
-                                                      s->input_format == AV_PIX_FMT_UYVY422 ? AsyncMultiMapper::UYVY422 : AsyncMultiMapper::YUYV422);
+                                                      s->input_format == AV_PIX_FMT_UYVY422 ? vr::AsyncMultiMapper::UYVY422 : vr::AsyncMultiMapper::YUYV422);
         av_log(ctx, AV_LOG_INFO, "Init async remapper done\n");
     }
 
