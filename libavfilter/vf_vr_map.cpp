@@ -310,7 +310,7 @@ static int init(AVFilterContext *ctx) {
             s->output_regions[i].height = std::atof(region_split_more[3].c_str());
         }
 
-        av_log(ctx, AV_LOG_DEBUG, "Output No.%d: blend=%d, exposure=%d, region=(%d,%d)-(%dx%d)\n",
+        av_log(ctx, AV_LOG_DEBUG, "Output No.%d: blend=%d, exposure=%d, region=(%.2f,%.2f)-(%.2fx%.2f)\n",
                i, s->blend_modes[i], s->gain_modes[i],
                s->output_regions[i].x, s->output_regions[i].y,
                s->output_regions[i].width, s->output_regions[i].height);
