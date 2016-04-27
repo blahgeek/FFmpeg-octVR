@@ -92,14 +92,14 @@ static int query_formats(AVFilterContext *ctx)
     AVFilterFormats *formats = NULL;
     ff_add_format(&formats, AV_PIX_FMT_UYVY422);
     ff_add_format(&formats, AV_PIX_FMT_YUYV422);
-    for(int i = 0 ; i < ctx->nb_inputs; i += 1) {
+    for(size_t i = 0 ; i < ctx->nb_inputs; i += 1) {
         if(ctx->inputs[i] && !ctx->inputs[i]->out_formats)
             ff_formats_ref(formats, &ctx->inputs[i]->out_formats);
     }
 
     AVFilterFormats *oformats = NULL;
     ff_add_format(&oformats, AV_PIX_FMT_UYVY422);
-    for(int i = 0 ; i < ctx->nb_outputs ; i += 1) {
+    for(size_t i = 0 ; i < ctx->nb_outputs ; i += 1) {
         if(ctx->outputs[i] && !ctx->outputs[i]->in_formats)
             ff_formats_ref(oformats, &ctx->outputs[i]->in_formats);
     }
@@ -135,7 +135,7 @@ static int push_frame(AVFilterContext * ctx) {
             av_assert0(frames[i] != nullptr);
 
             auto & f = frames[i];
-            int real_w = s->opt_crop_w != 0 ? opt_s->crop_w : f->width;
+            int real_w = s->opt_crop_w != 0 ? s->opt_crop_w : f->width;
             av_assert0(real_w % 2 == 0 && s->opt_crop_x % 2 == 0);
             in_mats.emplace_back(f->height, real_w,
                                  CV_8UC2, 
@@ -159,13 +159,13 @@ static int push_frame(AVFilterContext * ctx) {
     else {
         s->async_remapper->pop();
         real_out_frame = s->last_frames[ctx->nb_inputs];
-        for(int i = 0 ; i < ctx->nb_inputs ; i += 1)
+        for(size_t i = 0 ; i < ctx->nb_inputs ; i += 1)
             av_frame_free(&s->last_frames[i]);
         timer.tick("Pop last frames");
     }
 
     if(queues_available) {
-        for(int i = 0 ; i < ctx->nb_inputs ; i += 1)
+        for(size_t i = 0 ; i < ctx->nb_inputs ; i += 1)
             s->last_frames[i] = frames[i];
         s->last_frames[ctx->nb_inputs] = out_frame;
     } else {
@@ -177,7 +177,6 @@ static int push_frame(AVFilterContext * ctx) {
         ff_filter_frame(ctx->outputs[0], real_out_frame);
     timer.tick("Do next filter");
 
-    delete [] real_out_frames;
     return 0;
 }
 
@@ -224,7 +223,7 @@ static int config_input(AVFilterLink *inlink) {
             std::vector<int>(s->gain_modes, s->gain_modes + s->outputs),
             std::vector<cv::Rect_<double>>(s->output_regions, s->output_regions + s->outputs),
             s->input_format == AV_PIX_FMT_UYVY422 ? OCTVR_UYVY422 : OCTVR_YUYV422,
-            cv::Rect(s->opt_preview_width, s->opt_preview_height)
+            cv::Size(s->opt_preview_width, s->opt_preview_height)
         );
         av_log(ctx, AV_LOG_INFO, "Init async remapper done\n");
     }
@@ -245,7 +244,7 @@ static int request_frame(AVFilterLink *outlink) {
     AVFilterContext *ctx = outlink->src;
     VRMapContext *s = static_cast<VRMapContext *>(ctx->priv);
 
-    for(int i = 0 ; i < ctx->nb_inputs ; i += 1) {
+    for(size_t i = 0 ; i < ctx->nb_inputs ; i += 1) {
         if(!s->queues[i].available && !ctx->inputs[i]->closed) {
             int ret = ff_request_frame(ctx->inputs[i]);
             if(ret != AVERROR_EOF)
@@ -260,17 +259,17 @@ static int init(AVFilterContext *ctx) {
     VRMapContext *s = static_cast<VRMapContext *>(ctx->priv);
 
     // parse opts
-    auto opt_outputs_split = split(s->opt_outputs, "|");
+    auto opt_outputs_split = split(s->opt_outputs, '|');
     s->outputs = opt_outputs_split.size();
     av_assert0(s->outputs > 0);
 
-    auto opt_blend_split = split(s->opt_blend, "|");
+    auto opt_blend_split = split(s->opt_blend, '|');
     av_assert0(opt_blend_split.size() == s->outputs || opt_blend_split.empty());
 
-    auto opt_exposure_split = split(s->opt_exposure, "|");
+    auto opt_exposure_split = split(s->opt_exposure, '|');
     av_assert0(opt_exposure_split.size() == s->outputs || opt_exposure_split.empty());
 
-    auto opt_region_split = split(s->opt_region, "|");
+    auto opt_region_split = split(s->opt_region, '|');
     av_assert0(opt_region_split.size() == s->outputs || opt_region_split.empty());
 
     s->mapper_templates = new vr::MapperTemplate * [s->outputs];
@@ -279,8 +278,8 @@ static int init(AVFilterContext *ctx) {
     s->output_regions = new cv::Rect_<double> [s->outputs];
 
     for(int i = 0 ; i < s->outputs ; i += 1) {
-        av_log(ctx, AV_LOG_INFO, "Loading template %s\n", filename.c_str());
-        std::ifstream f(filename.c_str(), std::ios::binary);
+        av_log(ctx, AV_LOG_INFO, "Loading template %s\n", opt_outputs_split[i].c_str());
+        std::ifstream f(opt_outputs_split[i].c_str(), std::ios::binary);
         try {
             s->mapper_templates[i] = new vr::MapperTemplate(f);
         } catch (std::string & e) {
@@ -304,7 +303,7 @@ static int init(AVFilterContext *ctx) {
         if(opt_region_split.empty())
             s->output_regions[i] = cv::Rect_<double>(0., 0., 1., 1.);
         else {
-            auto region_split_more = split(opt_region_split[i].c_str(), "/");
+            auto region_split_more = split(opt_region_split[i].c_str(), '/');
             s->output_regions[i].x = std::atof(region_split_more[0].c_str());
             s->output_regions[i].y = std::atof(region_split_more[1].c_str());
             s->output_regions[i].width = std::atof(region_split_more[2].c_str());
@@ -345,12 +344,12 @@ static void uninit(AVFilterContext *ctx) {
     av_log(ctx, AV_LOG_INFO, "uniniting...\n");
 
     VRMapContext *s = static_cast<VRMapContext *>(ctx->priv);
-    for(int i = 0 ; i < s->nb_inputs ; i += 1) {
+    for(size_t i = 0 ; i < ctx->nb_inputs ; i += 1) {
         ff_bufqueue_discard_all(&s->queues[i]);
         av_freep(&s->queues[i]);
         av_freep(&ctx->input_pads[i].name);
     }
-    for(int i = 0 ; i < s->nb_outputs ; i += 1) {
+    for(size_t i = 0 ; i < s->outputs ; i += 1) {
         delete s->mapper_templates[i];
         s->mapper_templates[i] = NULL;
     }
