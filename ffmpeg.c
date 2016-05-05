@@ -114,7 +114,7 @@
 #include <sodium.h>
 #endif
 
-const char program_name[] = "ffmpeg";
+const char program_name[] = "OwlLiveCore";
 const int program_birth_year = 2000;
 
 static FILE *vstats_file;
@@ -4252,7 +4252,7 @@ int main(int argc, char **argv)
     av_register_all();
     avformat_network_init();
 
-    show_banner(argc, argv, options);
+    //show_banner(argc, argv, options);
 
     term_init();
 

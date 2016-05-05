@@ -12,8 +12,7 @@ PREFIX=`pwd`/../
     --prefix="$PREFIX" \
     --extra-cflags="-DENCRYPT_ARG -DSODIUM_STATIC -I../include $OPENCV_INCLUDES $SODIUM_INCLUDES -I../nvidia_video_sdk_6.0.1/Samples/common/inc/ -I../BlackmagicDeckLinkSDK/Linux/include" \
     --extra-libs="-Wl,-Bstatic $SODIUM_LIBS -Wl,-Bdynamic $OPENCV_LIBS "\
-    --enable-gpl \
-    --enable-nonfree \
+    --enable-shared \
     --enable-nvenc \
     --enable-encoder=mpeg4 \
     --enable-decklink \

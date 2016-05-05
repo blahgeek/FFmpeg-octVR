@@ -10,8 +10,7 @@ PREFIX=`pwd`/../
     --prefix="$PREFIX" \
     --extra-cflags="-I../include $OPENCV_INCLUDES -I../nvidia_video_sdk_6.0.1/Samples/common/inc/ -I../BlackmagicDeckLinkSDK/Linux/include" \
     --extra-libs="$OPENCV_LIBS" \
-    --enable-gpl \
-    --enable-nonfree \
+    --enable-shared \
     --enable-nvenc \
     --enable-encoder=mpeg4 \
     --enable-decklink \

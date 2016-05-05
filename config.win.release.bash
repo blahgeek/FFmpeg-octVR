@@ -10,8 +10,7 @@ cp "${CUDA_PATH}"/lib/x64/*.lib .
 ./configure \
     --prefix="$PREFIX" \
     --toolchain=msvc \
-    --enable-gpl \
-    --enable-nonfree \
+    --enable-shared \
     --enable-nvenc \
     --enable-pthreads \
     --enable-decklink \
