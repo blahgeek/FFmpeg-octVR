@@ -182,6 +182,7 @@ void avfilter_register_all(void)
     REGISTER_FILTER(INTERLEAVE,     interleave,     vf);
     REGISTER_FILTER(KERNDEINT,      kerndeint,      vf);
     REGISTER_FILTER(LENSCORRECTION, lenscorrection, vf);
+    REGISTER_FILTER(LOOP,           loop,           vf);
     REGISTER_FILTER(LUT3D,          lut3d,          vf);
     REGISTER_FILTER(LUT,            lut,            vf);
     REGISTER_FILTER(LUTRGB,         lutrgb,         vf);
