@@ -2,7 +2,7 @@
 * @Author: BlahGeek
 * @Date:   2015-09-01
 * @Last Modified by:   BlahGeek
-* @Last Modified time: 2016-04-26
+* @Last Modified time: 2019-01-01
 */
 
 #include <stdio.h>
@@ -90,15 +90,14 @@ typedef struct {
 static int query_formats(AVFilterContext *ctx)
 {
     AVFilterFormats *formats = NULL;
-    ff_add_format(&formats, AV_PIX_FMT_UYVY422);
-    ff_add_format(&formats, AV_PIX_FMT_YUYV422);
+    ff_add_format(&formats, AV_PIX_FMT_YUV420P);
     for(size_t i = 0 ; i < ctx->nb_inputs; i += 1) {
         if(ctx->inputs[i] && !ctx->inputs[i]->out_formats)
             ff_formats_ref(formats, &ctx->inputs[i]->out_formats);
     }
 
     AVFilterFormats *oformats = NULL;
-    ff_add_format(&oformats, AV_PIX_FMT_UYVY422);
+    ff_add_format(&oformats, AV_PIX_FMT_YUV420P);
     for(size_t i = 0 ; i < ctx->nb_outputs ; i += 1) {
         if(ctx->outputs[i] && !ctx->outputs[i]->in_formats)
             ff_formats_ref(oformats, &ctx->outputs[i]->in_formats);
@@ -126,8 +125,8 @@ static int push_frame(AVFilterContext * ctx) {
     std::vector<AVFrame *> frames(ctx->nb_inputs, NULL);
     AVFrame * out_frame = NULL;
 
-    std::vector<cv::Mat> in_mats;
-    cv::Mat out_mat;
+    std::vector<std::tuple<cv::Mat, cv::Mat, cv::Mat>> in_mats;
+    std::tuple<cv::Mat, cv::Mat, cv::Mat> out_mat;
 
     if(queues_available) {
         for(size_t i = 0 ; i < ctx->nb_inputs ; i += 1) {
@@ -137,17 +136,27 @@ static int push_frame(AVFilterContext * ctx) {
             auto & f = frames[i];
             int real_w = s->opt_crop_w != 0 ? s->opt_crop_w : f->width;
             av_assert0(real_w % 2 == 0 && s->opt_crop_x % 2 == 0);
-            in_mats.emplace_back(f->height, real_w,
-                                 CV_8UC2, 
-                                 f->data[0] + s->opt_crop_x * 2, 
-                                 f->linesize[0]);
+
+            in_mats.emplace_back(cv::Mat(f->height, real_w, CV_8U,
+                                         f->data[0] + s->opt_crop_x,
+                                         f->linesize[0]),
+                                 cv::Mat(f->height / 2, real_w / 2, CV_8U,
+                                         f->data[1] + s->opt_crop_x / 2,
+                                         f->linesize[1]),
+                                 cv::Mat(f->height / 2, real_w / 2, CV_8U,
+                                         f->data[2] + s->opt_crop_x / 2,
+                                         f->linesize[2]));
         }
         timer.tick("Prepare inputs");
 
         out_frame = ff_get_video_buffer(ctx->outputs[0], s->opt_width, s->opt_height);
         av_frame_copy_props(out_frame, frames[0]);
-        out_mat = cv::Mat(cv::Size(s->opt_width, s->opt_height),
-                          CV_8UC2, out_frame->data[0], out_frame->linesize[0]);
+        out_mat = std::make_tuple(cv::Mat(cv::Size(s->opt_width, s->opt_height), CV_8U,
+                                          out_frame->data[0], out_frame->linesize[0]),
+                                  cv::Mat(cv::Size(s->opt_width / 2, s->opt_height / 2), CV_8U,
+                                          out_frame->data[1], out_frame->linesize[1]),
+                                  cv::Mat(cv::Size(s->opt_width / 2, s->opt_height / 2), CV_8U,
+                                          out_frame->data[2], out_frame->linesize[2]));
 
         timer.tick("Prepare outputs");
         s->async_remapper->push(in_mats, out_mat);
@@ -207,7 +216,7 @@ static int config_input(AVFilterLink *inlink) {
     }
     if(s->input_format == 0) {
         s->input_format = inlink->format;
-        av_assert0(s->input_format == AV_PIX_FMT_UYVY422 || s->input_format == AV_PIX_FMT_YUYV422);
+        av_assert0(s->input_format == AV_PIX_FMT_YUV420P);
     }
 
     if(in_no == ctx->nb_inputs - 1) {
@@ -222,7 +231,6 @@ static int config_input(AVFilterLink *inlink) {
             std::vector<int>(s->blend_modes, s->blend_modes + s->outputs),
             std::vector<int>(s->gain_modes, s->gain_modes + s->outputs),
             std::vector<cv::Rect_<double>>(s->output_regions, s->output_regions + s->outputs),
-            s->input_format == AV_PIX_FMT_UYVY422 ? OCTVR_UYVY422 : OCTVR_YUYV422,
             cv::Size(s->opt_preview_width, s->opt_preview_height)
         );
         av_log(ctx, AV_LOG_INFO, "Init async remapper done\n");
