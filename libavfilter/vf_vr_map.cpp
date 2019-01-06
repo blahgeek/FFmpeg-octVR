@@ -2,7 +2,7 @@
 * @Author: BlahGeek
 * @Date:   2015-09-01
 * @Last Modified by:   BlahGeek
-* @Last Modified time: 2019-01-01
+* @Last Modified time: 2019-01-06
 */
 
 #include <stdio.h>
@@ -91,6 +91,7 @@ static int query_formats(AVFilterContext *ctx)
 {
     AVFilterFormats *formats = NULL;
     ff_add_format(&formats, AV_PIX_FMT_YUV420P);
+    ff_add_format(&formats, AV_PIX_FMT_YUVJ420P);
     for(size_t i = 0 ; i < ctx->nb_inputs; i += 1) {
         if(ctx->inputs[i] && !ctx->inputs[i]->out_formats)
             ff_formats_ref(formats, &ctx->inputs[i]->out_formats);
@@ -216,7 +217,7 @@ static int config_input(AVFilterLink *inlink) {
     }
     if(s->input_format == 0) {
         s->input_format = inlink->format;
-        av_assert0(s->input_format == AV_PIX_FMT_YUV420P);
+        av_assert0(s->input_format == AV_PIX_FMT_YUV420P || s->input_format == AV_PIX_FMT_YUVJ420P);
     }
 
     if(in_no == ctx->nb_inputs - 1) {
