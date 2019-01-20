@@ -61,7 +61,7 @@ std::vector<std::string> split(const char * s, char delim) {
 
 
 typedef struct {
-    const AVClass *avclass;
+    VRMapBaseContext base;
 
     // opts
     int opt_inputs;
@@ -113,65 +113,51 @@ int vr_map_query_formats(AVFilterContext *ctx)
     return 0;
 }
 
-static int push_frame(AVFilterContext * ctx) {
+static int on_event(FFFrameSync *fs) {
+    AVFilterContext *ctx = fs->parent;
     VRMapContext *s = static_cast<VRMapContext *>(ctx->priv);
-
-    // bool inputs_eof = std::any_of(ctx->inputs, ctx->inputs + ctx->nb_inputs,
-    //                               [](AVFilterLink *l){ return l->closed; });
-    bool inputs_eof = false; // TODO
-    bool queues_available = std::all_of(s->queues, s->queues + ctx->nb_inputs,
-                                        [](struct FFBufQueue &q){ return q.available; });
-    bool has_last_frame = s->last_frames != NULL;
-
-    if(!queues_available && inputs_eof && !has_last_frame)
-        return AVERROR_EOF;
-    if(!queues_available && !inputs_eof)
-        return 0;
 
     vr::Timer timer("FFMpeg Filter");
 
     std::vector<AVFrame *> frames(ctx->nb_inputs, NULL);
-    AVFrame * out_frame = NULL;
-
     std::vector<std::tuple<cv::Mat, cv::Mat, cv::Mat>> in_mats;
-    std::tuple<cv::Mat, cv::Mat, cv::Mat> out_mat;
 
-    if(queues_available) {
-        for(size_t i = 0 ; i < ctx->nb_inputs ; i += 1) {
-            frames[i] = ff_bufqueue_get(&s->queues[i]);
-            av_assert0(frames[i] != nullptr);
+    for (int i = 0 ; i < ctx->nb_inputs ; i += 1) {
+        int err = ff_framesync_get_frame(fs, i, &frames[i], 1);
+        if (err < 0)
+            return err;
 
-            auto & f = frames[i];
-            int real_w = s->opt_crop_w != 0 ? s->opt_crop_w : f->width;
-            av_assert0(real_w % 2 == 0 && s->opt_crop_x % 2 == 0);
+        auto & f = frames[i];
+        int real_w = s->opt_crop_w != 0 ? s->opt_crop_w : f->width;
+        av_assert0(real_w % 2 == 0 && s->opt_crop_x % 2 == 0);
 
-            in_mats.emplace_back(cv::Mat(f->height, real_w, CV_8U,
-                                         f->data[0] + s->opt_crop_x,
-                                         f->linesize[0]),
-                                 cv::Mat(f->height / 2, real_w / 2, CV_8U,
-                                         f->data[1] + s->opt_crop_x / 2,
-                                         f->linesize[1]),
-                                 cv::Mat(f->height / 2, real_w / 2, CV_8U,
-                                         f->data[2] + s->opt_crop_x / 2,
-                                         f->linesize[2]));
-        }
-        timer.tick("Prepare inputs");
-
-        out_frame = ff_get_video_buffer(ctx->outputs[0], s->opt_width, s->opt_height);
-        av_frame_copy_props(out_frame, frames[0]);
-        out_mat = std::make_tuple(cv::Mat(cv::Size(s->opt_width, s->opt_height), CV_8U,
-                                          out_frame->data[0], out_frame->linesize[0]),
-                                  cv::Mat(cv::Size(s->opt_width / 2, s->opt_height / 2), CV_8U,
-                                          out_frame->data[1], out_frame->linesize[1]),
-                                  cv::Mat(cv::Size(s->opt_width / 2, s->opt_height / 2), CV_8U,
-                                          out_frame->data[2], out_frame->linesize[2]));
-
-        timer.tick("Prepare outputs");
-        s->async_remapper->push(in_mats, out_mat);
+        in_mats.emplace_back(cv::Mat(f->height, real_w, CV_8U,
+                                     f->data[0] + s->opt_crop_x,
+                                     f->linesize[0]),
+                             cv::Mat(f->height / 2, real_w / 2, CV_8U,
+                                     f->data[1] + s->opt_crop_x / 2,
+                                     f->linesize[1]),
+                             cv::Mat(f->height / 2, real_w / 2, CV_8U,
+                                     f->data[2] + s->opt_crop_x / 2,
+                                     f->linesize[2]));
     }
+    timer.tick("Prepare inputs");
+
+    AVFrame *out_frame = ff_get_video_buffer(ctx->outputs[0], s->opt_width, s->opt_height);
+    av_frame_copy_props(out_frame, frames[0]);
+    std::tuple<cv::Mat, cv::Mat, cv::Mat> out_mat(
+            cv::Mat(cv::Size(s->opt_width, s->opt_height), CV_8U,
+                    out_frame->data[0], out_frame->linesize[0]),
+            cv::Mat(cv::Size(s->opt_width / 2, s->opt_height / 2), CV_8U,
+                    out_frame->data[1], out_frame->linesize[1]),
+            cv::Mat(cv::Size(s->opt_width / 2, s->opt_height / 2), CV_8U,
+                    out_frame->data[2], out_frame->linesize[2]));
+
+    timer.tick("Prepare outputs");
+    s->async_remapper->push(in_mats, out_mat);
 
     AVFrame * real_out_frame = NULL;
-    if(!has_last_frame)
+    if(s->last_frames == NULL)
         s->last_frames = new AVFrame * [ctx->nb_inputs + 1];
     else {
         s->async_remapper->pop();
@@ -181,31 +167,15 @@ static int push_frame(AVFilterContext * ctx) {
         timer.tick("Pop last frames");
     }
 
-    if(queues_available) {
-        for(size_t i = 0 ; i < ctx->nb_inputs ; i += 1)
-            s->last_frames[i] = frames[i];
-        s->last_frames[ctx->nb_inputs] = out_frame;
-    } else {
-        delete [] s->last_frames;
-        s->last_frames = NULL;
-    }
+    for(size_t i = 0 ; i < ctx->nb_inputs ; i += 1)
+        s->last_frames[i] = frames[i];
+    s->last_frames[ctx->nb_inputs] = out_frame;
 
     if(real_out_frame)
         ff_filter_frame(ctx->outputs[0], real_out_frame);
     timer.tick("Do next filter");
 
     return 0;
-}
-
-static int filter_frame(AVFilterLink *inlink, AVFrame * frame) {
-    AVFilterContext * ctx = inlink->dst;
-    VRMapContext *s = static_cast<VRMapContext *>(ctx->priv);
-    unsigned in_no = FF_INLINK_IDX(inlink);
-
-    av_log(ctx, AV_LOG_DEBUG, "filter_frame: %u\n", in_no);
-    ff_bufqueue_add(ctx, &s->queues[in_no], frame);
-
-    return push_frame(ctx);
 }
 
 static int config_input(AVFilterLink *inlink) {
@@ -242,6 +212,27 @@ static int config_input(AVFilterLink *inlink) {
             cv::Size(s->opt_preview_width, s->opt_preview_height)
         );
         av_log(ctx, AV_LOG_INFO, "Init async remapper done\n");
+
+        int err = ff_framesync_init(&s->base.fs, inlink->src, ctx->nb_inputs);
+        if (err < 0)
+            return err;
+
+        s->base.fs.opaque = ctx;
+        s->base.fs.on_event = on_event;
+
+        FFFrameSyncIn *in = s->base.fs.in;
+        for (int i = 0 ; i < ctx->nb_inputs ; i += 1) {
+            const AVFilterLink *inlink = inlink->src->inputs[i];
+
+            in[i].time_base = inlink->time_base;
+            in[i].sync = 1;
+            in[i].before = EXT_STOP;
+            in[i].after = EXT_INFINITY;
+        }
+
+        err = ff_framesync_configure(&s->base.fs);
+        if (err < 0)
+            return err;
     }
 
     return 0;
@@ -254,21 +245,6 @@ static int config_output(AVFilterLink *link)
     link->w = s->opt_width;
     link->h = s->opt_height;
     return 0;
-}
-
-static int request_frame(AVFilterLink *outlink) {
-    AVFilterContext *ctx = outlink->src;
-    VRMapContext *s = static_cast<VRMapContext *>(ctx->priv);
-
-    for(size_t i = 0 ; i < ctx->nb_inputs ; i += 1) {
-        if(!s->queues[i].available /* && !ctx->inputs[i]->closed */) {
-            int ret = ff_request_frame(ctx->inputs[i]);
-            if(ret != AVERROR_EOF)
-                return ret;
-        }
-    }
-
-    return push_frame(ctx);
 }
 
 int vr_map_init(AVFilterContext *ctx) {
@@ -340,7 +316,6 @@ int vr_map_init(AVFilterContext *ctx) {
         AVFilterPad inpad = { 0 };
         inpad.name = av_strdup(av_asprintf("input%d", i));
         inpad.type = AVMEDIA_TYPE_VIDEO;
-        inpad.filter_frame = filter_frame;
         inpad.config_props = config_input;
         ff_insert_inpad(ctx, i, &inpad);
     }
@@ -349,7 +324,6 @@ int vr_map_init(AVFilterContext *ctx) {
     AVFilterPad outpad = { 0 };
     outpad.name = av_strdup("output0");
     outpad.type = AVMEDIA_TYPE_VIDEO;
-    outpad.request_frame = request_frame;
     outpad.config_props = config_output;
     ff_insert_outpad(ctx, 0, &outpad);
 
@@ -360,6 +334,9 @@ void vr_map_uninit(AVFilterContext *ctx) {
     av_log(ctx, AV_LOG_INFO, "uniniting...\n");
 
     VRMapContext *s = static_cast<VRMapContext *>(ctx->priv);
+    if (ctx->nb_inputs > 0) {
+        ff_framesync_uninit(&s->base.fs);
+    }
     for(size_t i = 0 ; i < ctx->nb_inputs ; i += 1) {
         ff_bufqueue_discard_all(&s->queues[i]);
         av_freep(&s->queues[i]);
@@ -373,6 +350,12 @@ void vr_map_uninit(AVFilterContext *ctx) {
         delete s->async_remapper;
         s->async_remapper = NULL;
     }
+}
+
+int vr_map_activate(AVFilterContext *avctx) {
+    VRMapBaseContext *ctx = static_cast<VRMapBaseContext *>(avctx->priv);
+    av_assert0(avctx->nb_inputs > 0);
+    return ff_framesync_activate(&ctx->fs);
 }
 
 #define OFFSET(x) offsetof(VRMapContext, x)

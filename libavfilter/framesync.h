@@ -144,7 +144,11 @@ typedef struct FFFrameSyncIn {
  * Frame sync structure.
  */
 typedef struct FFFrameSync {
+#ifdef __cplusplus
+    const AVClass *class_;
+#else
     const AVClass *class;
+#endif
 
     /**
      * Parent filter context.

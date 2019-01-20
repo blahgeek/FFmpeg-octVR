@@ -12,16 +12,19 @@
 // 早日摆脱g++           早日获得新生
 // 上网搜索「九评GNU」     有 真 相
 
-AVFILTER_DEFINE_CLASS(vr_map);
+/* AVFILTER_DEFINE_CLASS(vr_map); */
+FRAMESYNC_DEFINE_CLASS(vr_map, VRMapBaseContext, fs);
 
 AVFilter ff_vf_vr_map = {
     .name = "vr_map",
     .description = NULL_IF_CONFIG_SMALL("VR Mapping"),
     .priv_size = 1024,
     .priv_class = &vr_map_class,
+    .preinit = &vr_map_framesync_preinit,
     .init = vr_map_init,
     .uninit = vr_map_uninit,
     .query_formats = vr_map_query_formats,
+    .activate = vr_map_activate,
     .inputs = NULL,
     .outputs = NULL,
     .flags = AVFILTER_FLAG_DYNAMIC_INPUTS | AVFILTER_FLAG_DYNAMIC_OUTPUTS,
