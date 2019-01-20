@@ -2,7 +2,7 @@
 * @Author: BlahGeek
 * @Date:   2015-09-01
 * @Last Modified by:   BlahGeek
-* @Last Modified time: 2019-01-16
+* @Last Modified time: 2019-01-20
 */
 
 #include <stdio.h>
@@ -40,7 +40,9 @@ extern "C" {
 #include "octvr.hpp"
 
 // helper
-static std::vector<std::string> &split(const std::string &s, char delim, std::vector<std::string> &elems) {
+namespace {
+
+std::vector<std::string> &split(const std::string &s, char delim, std::vector<std::string> &elems) {
     std::stringstream ss(s);
     std::string item;
     while (std::getline(ss, item, delim))
@@ -53,6 +55,8 @@ std::vector<std::string> split(const char * s, char delim) {
     std::vector<std::string> elems;
     split(std::string(s), delim, elems);
     return elems;
+}
+
 }
 
 
@@ -112,8 +116,9 @@ int vr_map_query_formats(AVFilterContext *ctx)
 static int push_frame(AVFilterContext * ctx) {
     VRMapContext *s = static_cast<VRMapContext *>(ctx->priv);
 
-    bool inputs_eof = std::any_of(ctx->inputs, ctx->inputs + ctx->nb_inputs,
-                                  [](AVFilterLink *l){ return l->closed; });
+    // bool inputs_eof = std::any_of(ctx->inputs, ctx->inputs + ctx->nb_inputs,
+    //                               [](AVFilterLink *l){ return l->closed; });
+    bool inputs_eof = false; // TODO
     bool queues_available = std::all_of(s->queues, s->queues + ctx->nb_inputs,
                                         [](struct FFBufQueue &q){ return q.available; });
     bool has_last_frame = s->last_frames != NULL;
@@ -256,7 +261,7 @@ static int request_frame(AVFilterLink *outlink) {
     VRMapContext *s = static_cast<VRMapContext *>(ctx->priv);
 
     for(size_t i = 0 ; i < ctx->nb_inputs ; i += 1) {
-        if(!s->queues[i].available && !ctx->inputs[i]->closed) {
+        if(!s->queues[i].available /* && !ctx->inputs[i]->closed */) {
             int ret = ff_request_frame(ctx->inputs[i]);
             if(ret != AVERROR_EOF)
                 return ret;
