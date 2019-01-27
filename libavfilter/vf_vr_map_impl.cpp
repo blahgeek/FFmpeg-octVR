@@ -2,7 +2,7 @@
 * @Author: BlahGeek
 * @Date:   2015-09-01
 * @Last Modified by:   BlahGeek
-* @Last Modified time: 2019-01-20
+* @Last Modified time: 2019-01-27
 */
 
 #include <stdio.h>
@@ -222,8 +222,6 @@ static int config_input(AVFilterLink *inlink) {
 
         FFFrameSyncIn *in = s->base.fs.in;
         for (int i = 0 ; i < ctx->nb_inputs ; i += 1) {
-            const AVFilterLink *inlink = inlink->src->inputs[i];
-
             in[i].time_base = inlink->time_base;
             in[i].sync = 1;
             in[i].before = EXT_STOP;
