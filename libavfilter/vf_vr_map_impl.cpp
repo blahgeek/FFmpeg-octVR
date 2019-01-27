@@ -219,14 +219,14 @@ static int config_input(AVFilterLink *inlink) {
 
 static int config_output(AVFilterLink *link)
 {
-    AVFilterContext *avctx = static_case<AVFilterContext *>(link->src);
-    VRMapContext *s = static_cast<VRMapContext *>(avctx->priv);
+    AVFilterContext *ctx = static_cast<AVFilterContext *>(link->src);
+    VRMapContext *s = static_cast<VRMapContext *>(ctx->priv);
 
     link->w = s->opt_width;
     link->h = s->opt_height;
 
-    if (s->nb_inputs > 0) {
-        int err = ff_framesync_init(&s->base.fs, avctx, s->nb_inputs);
+    if (ctx->nb_inputs > 0) {
+        int err = ff_framesync_init(&s->base.fs, ctx, ctx->nb_inputs);
         if (err < 0)
             return err;
 
@@ -235,7 +235,7 @@ static int config_output(AVFilterLink *link)
 
         FFFrameSyncIn *in = s->base.fs.in;
         for (int i = 0 ; i < ctx->nb_inputs ; i += 1) {
-            const AVFilterLink *inlink = avctx->inputs[i];
+            const AVFilterLink *inlink = ctx->inputs[i];
 
             in[i].time_base = inlink->time_base;
             in[i].sync = 1;
