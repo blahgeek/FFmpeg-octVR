@@ -212,8 +212,21 @@ static int config_input(AVFilterLink *inlink) {
             cv::Size(s->opt_preview_width, s->opt_preview_height)
         );
         av_log(ctx, AV_LOG_INFO, "Init async remapper done\n");
+    }
 
-        int err = ff_framesync_init(&s->base.fs, inlink->src, ctx->nb_inputs);
+    return 0;
+}
+
+static int config_output(AVFilterLink *link)
+{
+    AVFilterContext *avctx = static_case<AVFilterContext *>(link->src);
+    VRMapContext *s = static_cast<VRMapContext *>(avctx->priv);
+
+    link->w = s->opt_width;
+    link->h = s->opt_height;
+
+    if (s->nb_inputs > 0) {
+        int err = ff_framesync_init(&s->base.fs, avctx, s->nb_inputs);
         if (err < 0)
             return err;
 
@@ -222,6 +235,8 @@ static int config_input(AVFilterLink *inlink) {
 
         FFFrameSyncIn *in = s->base.fs.in;
         for (int i = 0 ; i < ctx->nb_inputs ; i += 1) {
+            const AVFilterLink *inlink = avctx->inputs[i];
+
             in[i].time_base = inlink->time_base;
             in[i].sync = 1;
             in[i].before = EXT_STOP;
@@ -233,15 +248,6 @@ static int config_input(AVFilterLink *inlink) {
             return err;
     }
 
-    return 0;
-}
-
-static int config_output(AVFilterLink *link)
-{
-    VRMapContext *s = static_cast<VRMapContext *>(link->src->priv);
-
-    link->w = s->opt_width;
-    link->h = s->opt_height;
     return 0;
 }
 
